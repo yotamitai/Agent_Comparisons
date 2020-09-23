@@ -15,6 +15,7 @@ from interestingness_xrl.scenarios import DEFAULT_CONFIG, create_helper, AgentTy
 DEF_AGENT_TYPE = AgentType.Learning
 DEF_TRIAL = 0
 
+
 FPS = 20
 SHOW_SCORE_BAR = True
 CLEAR_RESULTS = True
