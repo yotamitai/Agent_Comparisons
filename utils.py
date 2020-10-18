@@ -4,13 +4,16 @@ import pickle
 from os.path import join
 from skimage import img_as_ubyte
 
-import imageio as imageio
+import imageio
 
 from interestingness_xrl.learning.agents import QValueBasedAgent
-from interestingness_xrl.scenarios import _get_base_dir
+from interestingness_xrl.scenarios import _get_base_dir, DEFAULT_CONFIG
+from interestingness_xrl.scenarios.configurations import EnvironmentConfiguration
 from interestingness_xrl.scenarios.frogger.configurations import FROGGER_CONFIG, FAST_FROGGER_CONFIG, \
     FROGGER_LIMITED_CONFIG, FROGGER_FEAR_WATER_CONFIG, FROGGER_HIGH_VISION_CONFIG
 from configurations.configurations import EXPERT_CONFIG
+
+
 
 from Agent_Comparisons.explorations import GreedyExploration
 
@@ -52,28 +55,37 @@ class AgentType(object):
             return 'Unknown'
 
 
-class Trace(object):
-    def __init__(self):
-        self.obs = []
-        self.actions = []
-        self.rewards = []
-        self.dones = []
-        self.infos = []
-        self.reward_sum = 0
-        self.game_score = None
-        self.length = 0
-        self.states = []
+def load_agent_config(results_dir, trial=0):
+    results_dir = results_dir if results_dir else get_agent_output_dir(DEFAULT_CONFIG, AgentType.Learning, trial)
+    config_file = os.path.join(results_dir, 'config.json')
+    if not os.path.exists(results_dir) or not os.path.exists(config_file):
+        raise ValueError(f'Could not load configuration from: {config_file}.')
+    configuration = EnvironmentConfiguration.load_json(config_file)
+    # if testing, we want to force a seed different than training (diff. test environments)
+    #     configuration.seed += 1
+    return configuration, results_dir
 
 
-class State(object):
-    def __init__(self, name, obs, action_vector, feature_vector, img):
-        self.observation = obs
-        self.image = img
-        self.observed_actions = action_vector
-        self.name = name
-        self.features = feature_vector
-
-
+# class Trace(object):
+#     def __init__(self):
+#         self.obs = []
+#         self.actions = []
+#         self.rewards = []
+#         self.dones = []
+#         self.infos = []
+#         self.reward_sum = 0
+#         self.game_score = None
+#         self.length = 0
+#         self.states = []
+#
+#
+# class State(object):
+#     def __init__(self, name, obs, action_vector, feature_vector, img):
+#         self.observation = obs
+#         self.image = img
+#         self.observed_actions = action_vector
+#         self.name = name
+#         self.features = feature_vector
 
 
 

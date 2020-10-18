@@ -1,18 +1,16 @@
 import argparse
-from os import makedirs
-from os.path import exists, join, dirname
-
 import gym
 import numpy as np
+from os import makedirs
+from os.path import exists, join, dirname
 from gym.wrappers import Monitor
-from gym.utils.ezpickle import EzPickle
 
-from agent_runner import load_agent_config, video_schedule
-from interestingness_xrl.learning import write_table_csv
 from interestingness_xrl.learning.behavior_tracker import BehaviorTracker
 from interestingness_xrl.scenarios import create_helper
 
-from utils import get_agent_output_dir, create_agent, pickle_save, pickle_load, create_video, save_image, clean_dir
+from agent_runner import video_schedule
+from importance import better_than_you_confidence, second_best_confidence
+from utils import get_agent_output_dir, create_agent, load_agent_config, create_video
 
 
 def load_agent_aux(config, agent_dir, trial, seed, agent_rng, params, no_output=False):
@@ -40,7 +38,7 @@ def load_agent_aux(config, agent_dir, trial, seed, agent_rng, params, no_output=
     return env, helper, agent, behavior_tracker, output_dir, video_callable
 
 
-def disagreement(env, agent, helper, window, time_step, old_s, old_obs, previous_frames, episode):
+def disagreement_frames(env, agent, helper, window, time_step, old_s, old_obs, previous_frames, episode):
     # obtain last pre-disagreement frames
     same_frames = []
     start = time_step - window
@@ -51,12 +49,21 @@ def disagreement(env, agent, helper, window, time_step, old_s, old_obs, previous
     # run for for frame_window frames
     done = False
     for step in range(window):
-        if done:  # adds same frame if done so that all vids are same length
+        #TODO added the part : old_s == 1295 - this is the death state
+        if done or old_s == 1295:  # adds same frame if done so that all vids are same length
             disagreement_frames.append(env.video_recorder.last_frame)
             continue
         # record every step of the second agent
         a = agent.act(old_s)
         obs, r, done, _ = env.step(a)
+
+        # x = env.render(mode='human')
+        # from PIL import Image
+        # img = Image.fromarray(x, 'RGB')
+        # img.show()
+        # if env.game_state.game_over():
+        #     pass
+
         s = helper.get_state_from_observation(obs, r, done)
         agent.update(old_s, a, r, s)
         helper.update_stats(episode, time_step, old_obs, obs, old_s, a, r, s)
@@ -89,7 +96,7 @@ def reload_agent(config, agent_dir, trial, seed, rng, t, actions, params):
 def merge_frames(highlights_1, highlights_2, window):
     merged_frames = []
     buffer = list(highlights_1[0][0].shape)
-    buffer[1] = 10
+    buffer[1] = 6
     separator_shape = np.concatenate((highlights_1[0][0], np.full(tuple(buffer), 0), highlights_2[0][0]), axis=1).shape
     separator = [np.full(separator_shape, 0) for _ in range(10)]
 
@@ -114,8 +121,33 @@ def merge_frames(highlights_1, highlights_2, window):
 #     return frames_dir
 
 
-def divergence_score():
-    pass
+def divergence_score(a1, a2, current_state, importance):
+    if importance == 'sb':
+        return second_best_confidence(a1, a2, current_state)
+    elif importance == 'bety':
+        return better_than_you_confidence(a1, a2, current_state)
+    # if importance == 'avg_q_value':
+    #     return avg_q_value_score()
+
+
+def get_disagreement_frames(a1_frames, hl, traces_a2, window):
+    """get agent disagreement frames"""
+    a1_hl, a2_hl, i = {}, {}, 0
+    num_frames = len(a1_frames)
+    for d_i, frame_i in hl:
+        print(f'chosen disagreement frame: {frame_i}')
+        same_frames = []
+        a2_hl[i] = traces_a2[d_i]
+        start = frame_i - window
+        if start < 0:
+            same_frames = [a1_frames[0] for _ in range(abs(start))]
+            start = 0
+        end = frame_i + window if frame_i + window < num_frames else num_frames - 1
+        a1_hl[i] = same_frames + a1_frames[start:end]
+        if len(a1_hl[i]) < 2 * window:
+            a1_hl[i] += [a1_frames[-1] for _ in range(2 * window - len(a1_hl[i]))]
+        i += 1
+        return a1_hl, a2_hl
 
 
 def online_comparison(args):
@@ -132,14 +164,13 @@ def online_comparison(args):
         load_agent_aux(a2_config, a2_agent_dir, args.a2_trial, seed, agent_rng, args, no_output=True)
 
     """Run"""
-    disagreement_indexes, a1_traces, a2_traces, all_a1_frames = {}, {}, {}, []
+    disagreement_indexes, importance_scores, a2_traces, all_a1_frames = {}, {}, {}, []
     dis_i, frame_window = 0, int(args.horizon / 2)  # dis_i = disagreement index of frame
     for e in range(a1_config.num_episodes):
         if args.verbose:
             print(f'Episode: {e}')
         # set monitor
         a1_env.env.monitor = a1_env
-        # a2_env.env.monitor = a2_env
 
         # reset environment
         a1_old_obs = a1_env.reset()
@@ -150,32 +181,28 @@ def online_comparison(args):
         a1_done = False
         while not a1_done:
             # select action
-            # sample an action based on the softmax probabilities as determined by the q values of the available actions
             a1_a = a1_agent.act(a1_old_s)
             a2_a = a2_agent.act(a1_old_s)
-
             # check for disagreement
-            if a1_a != a2_a and dis_i < args.k_highlights:
+            if a1_a != a2_a:  # and dis_i < args.k_highlights:
+                print(f'Disagreement at frame {t}')
                 disagreement_indexes[dis_i] = t
                 preceding_actions = a1_behavior_tracker.s_a[0]
-                a2_traces[dis_i] = disagreement(a2_env, a2_agent, a2_helper, frame_window, t, a1_old_s, a1_old_obs,
-                                                    all_a1_frames, e)
-
+                a2_traces[dis_i] = disagreement_frames(a2_env, a2_agent, a2_helper, frame_window, t, a1_old_s,
+                                                       a1_old_obs, all_a1_frames, e)
                 # get score of diverged sequence to compare later
-                divergence_score() # TODO
-
+                importance_scores[dis_i] = divergence_score(a1_agent, a2_agent, a1_old_s, args.importance)
                 # close diverged env and unregister it
                 a2_env.close()
                 del gym.envs.registration.registry.env_specs[a2_env.spec.id]
                 a2_env, a2_helper, a2_agent, a2_behavior_tracker = \
                     reload_agent(a2_config, a2_agent_dir, args.a2_trial, seed, agent_rng, t, preceding_actions, args)
                 dis_i += 1
-
-
             # observe transition
             a1_obs, a1_r, a1_done, _ = a1_env.step(a1_a)
             a2_obs, a2_r, a2_done, _ = a2_env.step(a1_a)
             a1_s = a1_helper.get_state_from_observation(a1_obs, a1_r, a1_done)
+            #TODO save death states for frames in the videos. death state == 1295
             a1_r = a1_helper.get_reward(a1_old_s, a1_a, a1_r, a1_s, a1_done)
 
             # update agent and stats
@@ -190,18 +217,12 @@ def online_comparison(args):
             all_a1_frames.append(a1_env.video_recorder.last_frame)
             t += 1
 
-    """get agent 1 disagreement frames"""
-    num_frames = len(all_a1_frames)
-    for d_i, frame_i in disagreement_indexes.items():
-        same_frames = []
-        start = frame_i - frame_window
-        if start < 0:
-            same_frames = [all_a1_frames[0] for _ in range(abs(start))]
-            start = 0
-        end = frame_i + frame_window if frame_i + frame_window < num_frames else num_frames - 1
-        a1_traces[d_i] = same_frames + all_a1_frames[start:end]
-        if len(a1_traces[d_i]) < 2 * frame_window:
-            a1_traces[d_i] += [all_a1_frames[-1] for _ in range(2 * frame_window - len(a1_traces[d_i]))]
+    """top k disagreements"""
+    top_k_indexes = sorted(list(importance_scores.items()), key=lambda x: x[1], reverse=True)[:args.k_highlights]
+    highlights = sorted([(x[0], disagreement_indexes[x[0]]) for x in top_k_indexes])
+
+    """get disagreement highlights"""
+    a1_highlights, a2_highlights = get_disagreement_frames(all_a1_frames, highlights, a2_traces, frame_window)
 
     # writes results to files
     a1_agent.save(a1_output_dir)
@@ -209,7 +230,7 @@ def online_comparison(args):
     print('\nResults of trial {} written to:\n\t\'{}\''.format(args.a1_trial, a1_output_dir))
     a1_env.close()
     a2_env.close()
-    comparison_frames = merge_frames(a1_traces, a2_traces, args.horizon)
+    comparison_frames = merge_frames(a1_highlights, a2_highlights, args.horizon)
     create_video(a1_output_dir, comparison_frames)
 
 
@@ -219,6 +240,8 @@ if __name__ == '__main__':
     parser.add_argument('-t2', '--a2_trial', help='agent 2 trial number', type=int, default=1)
     parser.add_argument('-r1', '--a1_results', help='directory from which to load agent 1 results')
     parser.add_argument('-r2', '--a2_results', help='directory from which to load agent 2 results')
+    parser.add_argument('-imp', '--importance', help='method for calculating divergence between agents', type=str,
+                        default='bety')
     parser.add_argument('-n', '--num_episodes', help='number of episodes to run', type=int, default=1)
     parser.add_argument('-o', '--output', help='directory in which to store results')
     parser.add_argument('-c', '--config_file_path', help='path to config file')
@@ -239,5 +262,6 @@ if __name__ == '__main__':
     args.show_score_bar = True
     args.clear_results = True
     args.k_highlights = 5
+    args.importance = "bety" # "sb" "bety"
 
     online_comparison(args)

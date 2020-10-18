@@ -9,7 +9,7 @@ from os.path import join, exists
 from gym.wrappers import Monitor
 from gym.wrappers.monitoring.video_recorder import VideoRecorder
 
-from Agent_Comparisons.utils import FROGGER_CONFIG_DICT, AgentType
+from Agent_Comparisons.utils import FROGGER_CONFIG_DICT, AgentType, load_agent_config
 from interestingness_xrl.scenarios.configurations import EnvironmentConfiguration
 from interestingness_xrl.learning import write_table_csv
 from interestingness_xrl.learning.behavior_tracker import BehaviorTracker
@@ -22,15 +22,15 @@ def video_schedule(config, videos):
                      (e == config.num_episodes - 1 or e % int(config.num_episodes / config.num_recorded_videos) == 0)
 
 
-def load_agent_config(results_dir, trial=0):
-    results_dir = results_dir if results_dir else get_agent_output_dir(DEFAULT_CONFIG, AgentType.Learning, trial)
-    config_file = os.path.join(results_dir, 'config.json')
-    if not os.path.exists(results_dir) or not os.path.exists(config_file):
-        raise ValueError(f'Could not load configuration from: {config_file}.')
-    configuration = EnvironmentConfiguration.load_json(config_file)
-    # if testing, we want to force a seed different than training (diff. test environments)
-    #     configuration.seed += 1
-    return configuration, results_dir
+# def load_agent_config(results_dir, trial=0):
+#     results_dir = results_dir if results_dir else get_agent_output_dir(DEFAULT_CONFIG, AgentType.Learning, trial)
+#     config_file = os.path.join(results_dir, 'config.json')
+#     if not os.path.exists(results_dir) or not os.path.exists(config_file):
+#         raise ValueError(f'Could not load configuration from: {config_file}.')
+#     configuration = EnvironmentConfiguration.load_json(config_file)
+#     # if testing, we want to force a seed different than training (diff. test environments)
+#     #     configuration.seed += 1
+#     return configuration, results_dir
 
 
 def run_trial(args):
@@ -154,14 +154,20 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     """experiment parameters"""
-    args.agent = 1
+    args.agent = 0
     args.trial = 0
-    args.num_episodes = 1 # max 2000 (defined in configuration.py)
-    args.fps = 20
+    args.num_episodes = 2000 # max 2000 (defined in configuration.py)
+    args.fps = 2
     args.verbose = True
     args.record = True
     args.show_score_bar = True
     args.clear_results = True
     args.default_frogger_config = FROGGER_CONFIG_DICT['DEFAULT']
 
+    # for agent_type in FROGGER_CONFIG_DICT:
+    #     if agent_type in ['EXPERT', 'DEFAULT']:
+    #         continue
+    #     args.default_frogger_config = FROGGER_CONFIG_DICT[agent_type]
+    #     args.num_episodes = args.default_frogger_config.num_episodes
+    #     args.trial+=1
     run_trial(args)
