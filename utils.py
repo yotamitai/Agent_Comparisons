@@ -136,18 +136,12 @@ def pickle_save(obj, path):
     with open(path, "wb") as file:
         pickle.dump(obj, file)
 
-def create_video(output_dir, frames):
-    video_dir = os.path.join(output_dir, "video")
-    try:
-        os.makedirs(video_dir)
-    except:
-        clean_dir(video_dir)
-    # fileList = [image_dir + "/" + x for x in sorted(os.listdir(image_dir))]
+def create_video(output_dir, frames, name='video'):
     imgs = []
     kargs = {'macro_block_size': None, 'fps': 3}
     for f in frames:
         imgs.append(img_as_ubyte(f))
-    imageio.mimwrite(video_dir + "/" + 'video.mp4', imgs, 'MP4', **kargs)
+    imageio.mimwrite(output_dir + "/" + name +'.mp4', imgs, 'MP4', **kargs)
 
 
 def save_image(path, name, img):
@@ -158,3 +152,24 @@ def clean_dir(path, file_type=''):
     files = glob.glob(path + "/*" + file_type)
     for f in files:
         os.remove(f)
+
+
+def make_or_clean_dir(path):
+    try:
+        os.makedirs(path)
+    except:
+        clean_dir(path)
+
+def save_highlights(a1_hl, a2_hl, output_dir):
+    highlight_frames_dir = os.path.join(output_dir, "highlight_frames")
+    video_dir = os.path.join(output_dir, "videos")
+    make_or_clean_dir(video_dir)
+    make_or_clean_dir(highlight_frames_dir)
+
+    for hl_i in range(len(a1_hl)):
+        for img_i in range(len(a1_hl[hl_i])):
+            save_image(highlight_frames_dir, "a1_HL{}_FRAME{}".format(str(hl_i),str(img_i)), a1_hl[hl_i][img_i])
+            save_image(highlight_frames_dir, "a2_HL{}_FRAME{}".format(str(hl_i),str(img_i)), a2_hl[hl_i][img_i])
+
+        create_video(video_dir, a1_hl[hl_i], "a1_HL"+str(hl_i))
+        create_video(video_dir, a2_hl[hl_i], "a2_HL"+str(hl_i))

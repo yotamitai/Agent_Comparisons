@@ -64,8 +64,7 @@ def run_trial(args):
 
     # create environment and monitor
     env = gym.make(env_id)
-    # todo
-    config.num_episodes = args.num_episodes # TODO Yotam: why is this 100?
+    config.num_episodes = args.num_episodes
     video_callable = video_schedule(config, args.record)
     env = Monitor(env, directory=output_dir, force=True, video_callable=video_callable)
 

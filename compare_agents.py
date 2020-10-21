@@ -1,4 +1,5 @@
 import argparse
+
 import gym
 import numpy as np
 from os import makedirs
@@ -10,7 +11,7 @@ from interestingness_xrl.scenarios import create_helper
 
 from agent_runner import video_schedule
 from importance import better_than_you_confidence, second_best_confidence
-from utils import get_agent_output_dir, create_agent, load_agent_config, create_video
+from utils import get_agent_output_dir, create_agent, load_agent_config, create_video, save_image, save_highlights
 
 
 def load_agent_aux(config, agent_dir, trial, seed, agent_rng, params, no_output=False):
@@ -49,7 +50,7 @@ def disagreement_frames(env, agent, helper, window, time_step, old_s, old_obs, p
     # run for for frame_window frames
     done = False
     for step in range(window):
-        #TODO added the part : old_s == 1295 - this is the death state
+        # TODO added the part : old_s == 1295 - this is the death state
         if done or old_s == 1295:  # adds same frame if done so that all vids are same length
             disagreement_frames.append(env.video_recorder.last_frame)
             continue
@@ -130,7 +131,7 @@ def divergence_score(a1, a2, current_state, importance):
     #     return avg_q_value_score()
 
 
-def get_disagreement_frames(a1_frames, hl, traces_a2, window):
+def get_disagreement_frames(a1_frames, a1_tracker, hl, traces_a2, window):
     """get agent disagreement frames"""
     a1_hl, a2_hl, i = {}, {}, 0
     num_frames = len(a1_frames)
@@ -143,11 +144,24 @@ def get_disagreement_frames(a1_frames, hl, traces_a2, window):
             same_frames = [a1_frames[0] for _ in range(abs(start))]
             start = 0
         end = frame_i + window if frame_i + window < num_frames else num_frames - 1
-        a1_hl[i] = same_frames + a1_frames[start:end]
+
+        a1_hl[i] = same_frames
+        death, death_frame = False, []
+        for j in range(start, end):
+            if death:
+                a1_hl[i].append(death_frame)
+            elif a1_tracker[j] == 1295:
+                a1_hl[i].append(a1_frames[j])
+                death_frame = a1_frames[j]
+                death = True
+            else:
+                a1_hl[i].append(a1_frames[j])
+
+        # a1_hl[i] = same_frames + a1_frames[start:end]
         if len(a1_hl[i]) < 2 * window:
-            a1_hl[i] += [a1_frames[-1] for _ in range(2 * window - len(a1_hl[i]))]
+            a1_hl[i] += [a1_hl[i][-1] for _ in range(2 * window - len(a1_hl[i]))]
         i += 1
-        return a1_hl, a2_hl
+    return a1_hl, a2_hl
 
 
 def online_comparison(args):
@@ -180,6 +194,7 @@ def online_comparison(args):
         t = 0
         a1_done = False
         while not a1_done:
+        # for i in range(40):  # for testing
             # select action
             a1_a = a1_agent.act(a1_old_s)
             a2_a = a2_agent.act(a1_old_s)
@@ -202,7 +217,7 @@ def online_comparison(args):
             a1_obs, a1_r, a1_done, _ = a1_env.step(a1_a)
             a2_obs, a2_r, a2_done, _ = a2_env.step(a1_a)
             a1_s = a1_helper.get_state_from_observation(a1_obs, a1_r, a1_done)
-            #TODO save death states for frames in the videos. death state == 1295
+            # TODO save death states for frames in the videos. death state == 1295
             a1_r = a1_helper.get_reward(a1_old_s, a1_a, a1_r, a1_s, a1_done)
 
             # update agent and stats
@@ -222,16 +237,20 @@ def online_comparison(args):
     highlights = sorted([(x[0], disagreement_indexes[x[0]]) for x in top_k_indexes])
 
     """get disagreement highlights"""
-    a1_highlights, a2_highlights = get_disagreement_frames(all_a1_frames, highlights, a2_traces, frame_window)
+    a1_highlights, a2_highlights = get_disagreement_frames(all_a1_frames, a1_behavior_tracker.s_s[0], highlights,
+                                                           a2_traces, frame_window)
+
+    """save highlights"""
+    save_highlights(a1_highlights, a2_highlights, a1_output_dir)
+
+    comparison_frames = merge_frames(a1_highlights, a2_highlights, args.horizon)
+    create_video(a1_output_dir, comparison_frames)
 
     # writes results to files
     a1_agent.save(a1_output_dir)
-    # a1_helper.save_stats(join(a1_output_dir, 'results'), args.clear_results)
     print('\nResults of trial {} written to:\n\t\'{}\''.format(args.a1_trial, a1_output_dir))
     a1_env.close()
     a2_env.close()
-    comparison_frames = merge_frames(a1_highlights, a2_highlights, args.horizon)
-    create_video(a1_output_dir, comparison_frames)
 
 
 if __name__ == '__main__':
@@ -262,6 +281,6 @@ if __name__ == '__main__':
     args.show_score_bar = True
     args.clear_results = True
     args.k_highlights = 5
-    args.importance = "bety" # "sb" "bety"
+    args.importance = "bety"  # "sb" "bety"
 
     online_comparison(args)
