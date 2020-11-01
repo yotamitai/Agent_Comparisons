@@ -1,13 +1,17 @@
 import glob
 import os
 import pickle
-from os.path import join
+from os.path import join, dirname, exists
+
+import gym
+from gym.wrappers import Monitor
 from skimage import img_as_ubyte
 
 import imageio
 
 from interestingness_xrl.learning.agents import QValueBasedAgent
-from interestingness_xrl.scenarios import _get_base_dir, DEFAULT_CONFIG
+from interestingness_xrl.learning.behavior_tracker import BehaviorTracker
+from interestingness_xrl.scenarios import _get_base_dir, DEFAULT_CONFIG, create_helper
 from interestingness_xrl.scenarios.configurations import EnvironmentConfiguration
 from interestingness_xrl.scenarios.frogger.configurations import FROGGER_CONFIG, FAST_FROGGER_CONFIG, \
     FROGGER_LIMITED_CONFIG, FROGGER_FEAR_WATER_CONFIG, FROGGER_HIGH_VISION_CONFIG
@@ -173,3 +177,33 @@ def save_highlights(a1_hl, a2_hl, output_dir):
 
         create_video(video_dir, a1_hl[hl_i], "a1_HL"+str(hl_i))
         create_video(video_dir, a2_hl[hl_i], "a2_HL"+str(hl_i))
+
+
+def load_agent_aux(config, agent_dir, trial, seed, agent_rng, params, no_output=False):
+    helper = create_helper(config)
+    if not no_output:
+        output_dir = params.output if params.output is not None else get_agent_output_dir(config, 5, trial)
+    else:
+        output_dir = join(dirname(dirname(agent_dir)), 'compare/temp')
+    if not exists(output_dir):
+        os.makedirs(output_dir)
+    config.save_json(join(output_dir, 'config.json'))
+    helper.save_state_features(join(output_dir, 'state_features.csv'))
+    env_id = '{}-{}-v0'.format(config.gym_env_id, trial)
+    helper.register_gym_environment(env_id, False, params.fps, params.show_score_bar)
+    env = gym.make(env_id)
+    config.num_episodes = params.num_episodes
+    video_callable = video_schedule(config, params.record)
+    env = Monitor(env, directory=output_dir, force=True, video_callable=video_callable)
+    env.env.monitor = env
+    env.seed(seed)
+    agent, exploration_strategy = create_agent(helper, 5, agent_rng)
+    agent.load(agent_dir)
+    behavior_tracker = BehaviorTracker(config.num_episodes)
+    return env, helper, agent, behavior_tracker, output_dir, video_callable
+
+
+def video_schedule(config, videos):
+    # linear capture schedule
+    return lambda e: videos and \
+                     (e == config.num_episodes - 1 or e % int(config.num_episodes / config.num_recorded_videos) == 0)
