@@ -1,13 +1,13 @@
 import argparse
 import gym
 import numpy as np
-from disagreement import get_disagreement_frames, disagreement_frames, disagreement_score
-from utils import load_agent_config, save_highlights, load_agent_aux
+from disagreement import get_disagreement_frames, disagreement_frames, disagreement_score, save_disagreements
+from utils import load_agent_config, load_agent_aux
 
 
 def reload_agent(config, agent_dir, trial, seed, rng, t, actions, params):
     env, helper, agent, behavior_tracker, output_dir, _ = \
-        load_agent_aux(config, agent_dir, trial, seed, rng, params, no_output=True)
+        load_agent_aux(config, 5, agent_dir, trial, seed, rng, params, no_output=True)
     old_obs = env.reset()
     old_s = helper.get_state_from_observation(old_obs, 0, False)
     i = 0
@@ -60,64 +60,62 @@ def online_comparison(args):
     seed = a1_config.seed
     agent_rng = np.random.RandomState(seed)
     a1_env, a1_helper, a1_agent, a1_behavior_tracker, a1_output_dir, video_callable = \
-        load_agent_aux(a1_config, a1_agent_dir, args.a1_trial, seed, agent_rng, args)
+        load_agent_aux(a1_config, 5, a1_agent_dir, args.a1_trial, seed, agent_rng, args)
     a2_env, a2_helper, a2_agent, _, a2_output_dir, _ = \
-        load_agent_aux(a2_config, a2_agent_dir, args.a2_trial, seed, agent_rng, args, no_output=True)
+        load_agent_aux(a2_config, 5, a2_agent_dir, args.a2_trial, seed, agent_rng, args, no_output=True)
 
     """Run"""
     disagreement_indexes, importance_scores, a2_traces, all_a1_frames = {}, {}, {}, []
     dis_i, frame_window = 0, int(args.horizon / 2)  # dis_i = disagreement index of frame
-    for e in range(a1_config.num_episodes):
-        if args.verbose:
-            print(f'Episode: {e}')
-        # set monitor
-        a1_env.env.monitor = a1_env
 
-        # reset environment
-        a1_old_obs = a1_env.reset()
-        _ = a2_env.reset()
-        # this is a unique state that represents the elements surrounding the agent
-        a1_old_s = a1_helper.get_state_from_observation(a1_old_obs, 0, False)
-        t = 0
-        a1_done = False
-        # while not a1_done:
-        for i in range(10):  # for testing
-            # select action
-            a1_a = a1_agent.act(a1_old_s)
-            a2_a = a2_agent.act(a1_old_s)
-            # check for disagreement
-            if a1_a != a2_a:  # and dis_i < args.n_highlights:
-                print(f'Disagreement at frame {t}')
-                disagreement_indexes[dis_i] = t
-                preceding_actions = a1_behavior_tracker.s_a[0]
-                a2_traces[dis_i] = disagreement_frames(a2_env, a2_agent, a2_helper, frame_window, t, a1_old_s,
-                                                       a1_old_obs, all_a1_frames, e, args.crop_out)
-                # get score of diverged sequence to compare later
-                importance_scores[dis_i] = disagreement_score(a1_agent, a2_agent, a1_old_s, args.importance)
-                # close diverged env and unregister it
-                a2_env.close()
-                del gym.envs.registration.registry.env_specs[a2_env.spec.id]
-                a2_env, a2_helper, a2_agent, a2_behavior_tracker = \
-                    reload_agent(a2_config, a2_agent_dir, args.a2_trial, seed, agent_rng, t, preceding_actions, args)
-                dis_i += 1
-            # observe transition
-            a1_obs, a1_r, a1_done, _ = a1_env.step(a1_a)
-            a2_obs, a2_r, a2_done, _ = a2_env.step(a1_a)
-            a1_s = a1_helper.get_state_from_observation(a1_obs, a1_r, a1_done)
-            # TODO save death states for frames in the videos. death state == 1295
-            a1_r = a1_helper.get_reward(a1_old_s, a1_a, a1_r, a1_s, a1_done)
+    # set monitor
+    a1_env.env.monitor = a1_env
 
-            # update agent and stats
-            a1_agent.update(a1_old_s, a1_a, a1_r, a1_s)
-            a2_agent.update(a1_old_s, a1_a, a1_r, a1_s)
-            a1_helper.update_stats(e, t, a1_old_obs, a1_obs, a1_old_s, a1_a, a1_r, a1_s)
-            a2_helper.update_stats(e, t, a1_old_obs, a1_obs, a1_old_s, a1_a, a1_r, a1_s)
-            a1_behavior_tracker.add_sample(a1_old_s, a1_a)
-            a1_old_s = a1_s
-            a1_old_obs = a1_obs
-            # save frames or video
-            all_a1_frames.append(a1_env.video_recorder.last_frame[:args.crop_out])
-            t += 1
+    # reset environment
+    a1_old_obs = a1_env.reset()
+    _ = a2_env.reset()
+    # this is a unique state that represents the elements surrounding the agent
+    a1_old_s = a1_helper.get_state_from_observation(a1_old_obs, 0, False)
+    t = 0
+    a1_done = False
+    while not a1_done:
+        # for i in range(50):  # for testing
+        # select action
+        a1_a = a1_agent.act(a1_old_s)
+        a2_a = a2_agent.act(a1_old_s)
+        # check for disagreement
+        if a1_a != a2_a:  # and dis_i < args.n_highlights:
+            print(f'Disagreement at frame {t}')
+            disagreement_indexes[dis_i] = t
+            preceding_actions = a1_behavior_tracker.s_a[0]
+            a2_traces[dis_i] = disagreement_frames(a2_env, a2_agent, a2_helper, frame_window, t, a1_old_s,
+                                                   a1_old_obs, all_a1_frames, args.freeze_on_death)
+            # get score of diverged sequence to compare later
+            importance_scores[dis_i] = disagreement_score(a1_agent, a2_agent, a1_old_s, args.importance)
+            # close diverged env and unregister it
+            a2_env.close()
+            del gym.envs.registration.registry.env_specs[a2_env.spec.id]
+            a2_env, a2_helper, a2_agent, a2_behavior_tracker = \
+                reload_agent(a2_config, a2_agent_dir, args.a2_trial, seed, agent_rng, t, preceding_actions, args)
+            dis_i += 1
+        # observe transition
+        a1_obs, a1_r, a1_done, _ = a1_env.step(a1_a)
+        a2_obs, a2_r, a2_done, _ = a2_env.step(a1_a)
+        a1_s = a1_helper.get_state_from_observation(a1_obs, a1_r, a1_done)
+        # TODO save death states for frames in the videos. death state == 1295
+        a1_r = a1_helper.get_reward(a1_old_s, a1_a, a1_r, a1_s, a1_done)
+
+        # update agent and stats
+        a1_agent.update(a1_old_s, a1_a, a1_r, a1_s)
+        a2_agent.update(a1_old_s, a1_a, a1_r, a1_s)
+        a1_helper.update_stats(0, t, a1_old_obs, a1_obs, a1_old_s, a1_a, a1_r, a1_s)
+        a2_helper.update_stats(0, t, a1_old_obs, a1_obs, a1_old_s, a1_a, a1_r, a1_s)
+        a1_behavior_tracker.add_sample(a1_old_s, a1_a)
+        a1_old_s = a1_s
+        a1_old_obs = a1_obs
+        # save frames or video
+        all_a1_frames.append(a1_env.video_recorder.last_frame)
+        t += 1
 
     """top k diverse disagreements"""
     importance_sorted_indexes = sorted(list(importance_scores.items()), key=lambda x: x[1], reverse=True)
@@ -128,20 +126,20 @@ def online_comparison(args):
         if disagreement_state not in seen:
             seen.append(disagreement_state)
             top_k_diverse_state_indexes.append(idx)
-        if len(top_k_diverse_state_indexes) == args.n_highlights:
+        if len(top_k_diverse_state_indexes) == args.n_disagreements:
             break
-    highlights = sorted([(x, disagreement_indexes[x]) for x in top_k_diverse_state_indexes])
+    disagreements = sorted([(x, disagreement_indexes[x]) for x in top_k_diverse_state_indexes])
 
     """get disagreement frames"""
-    a1_highlights, a2_highlights = get_disagreement_frames(all_a1_frames, a1_behavior_tracker.s_s[0], highlights,
-                                                           a2_traces, frame_window)
+    a1_disagreements, a2_disagreements = get_disagreement_frames(all_a1_frames, a1_behavior_tracker.s_s[0],
+                                                                 disagreements, a2_traces, frame_window,
+                                                                 args.freeze_on_death)
 
     """overlay video"""
-    # get_overlaying_video(args.n_highlights, args.horizon, a1_highlights, a2_highlights, a1_output_dir)
+    # get_overlaying_video(args.n_disagreements, args.horizon, a1_disagreements, a2_disagreements, a1_output_dir)
 
-    """save highlights"""
-    save_highlights(a1_highlights, a2_highlights, a1_output_dir)
-
+    """save disagreements"""
+    save_disagreements(a1_disagreements, a2_disagreements, a1_output_dir)
 
     # comparison_frames = merge_frames(a1_highlights, a2_highlights, args.horizon)
     # create_video(a1_output_dir, comparison_frames)
@@ -162,29 +160,22 @@ if __name__ == '__main__':
     parser.add_argument('-imp', '--importance', help='method for calculating divergence between agents', type=str,
                         default='bety')
     parser.add_argument('-n', '--num_episodes', help='number of episodes to run', type=int, default=1)
-    parser.add_argument('-crop', '--crop_out', help='number of rows to crop to', type=int, default=None)
     parser.add_argument('-o', '--output', help='directory in which to store results')
     parser.add_argument('-c', '--config_file_path', help='path to config file')
-    parser.add_argument('-rv', '--record', help='record videos according to linear schedule', action='store_true')
-    parser.add_argument('-v', '--verbose', help='print information to the console', action='store_true')
+    parser.add_argument('-rv', '--record', help='record videos according to linear schedule', default=True)
+    parser.add_argument('-v', '--verbose', help='print information to the console', default=True)
     parser.add_argument('-hzn', '--horizon', help='number of frames to show per highlight', type=int,
                         default=20)
     args = parser.parse_args()
 
     """experiment parameters"""
-    args.a1_trial = 0
-    args.a2_trial = 1
-    args.a1_config = '/home/yotama/Local_Git/InterestingnessXRL/Agent_Comparisons/agents/Default'
-    args.a2_config = '/home/yotama/Local_Git/InterestingnessXRL/Agent_Comparisons/agents/Fast'
-    args.num_episodes = 1  # max 2000 (defined in configuration.py)
-    args.fps = 20
-    args.horizon = 20
-    args.verbose = True
-    args.record = True
-    args.show_score_bar = True
-    args.clear_results = True
-    args.n_highlights = 5
+    args.a1_config = '/home/yotama/Local_Git/InterestingnessXRL/Agent_Comparisons/agents/Expert'
+    args.a2_config = '/home/yotama/Local_Git/InterestingnessXRL/Agent_Comparisons/agents/Novice'
+    args.fps = 3
+    args.horizon = 14
+    args.show_score_bar = False
+    args.n_disagreements = 7
     args.importance = "bety"  # "sb" "bety"
-    args.crop_out = -40
+    args.freeze_on_death = False  # when an agent dies, keep getting frames or freeze
 
     online_comparison(args)

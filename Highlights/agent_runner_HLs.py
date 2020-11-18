@@ -34,55 +34,29 @@ def video_schedule(config, videos):
 
 
 def run_trial(args):
-    # tries to get agent type
-    agent_t = args.agent
-
-    if agent_t == AgentType.Testing:
-        # tries to load a pre-trained agent configuration file
-        config, results_dir = load_agent_config(args.results, args.trial)
-    else:
-        # tries to load env config from provided file path
-        config_file = args.config_file_path
-        config = args.default_frogger_config if config_file is None or not exists(config_file) \
-            else EnvironmentConfiguration.load_json(config_file)
-
-    # creates env helper
+    config, results_dir = load_agent_config(args.results, args.trial)
     helper = create_helper(config)
-
-    # checks for provided output dir
-    output_dir = args.output if args.output is not None else get_agent_output_dir(config, agent_t, args.trial)
+    output_dir = args.output
     if not exists(output_dir):
         makedirs(output_dir)
 
-    # saves / copies configs to file
-    config.save_json(join(output_dir, 'config.json'))
+    config.save_json(join(output_dir, 'config.json'))  # saves / copies configs to file
     helper.save_state_features(join(output_dir, 'state_features.csv'))
-
-    # register environment in Gym according to env config
-    env_id = '{}-{}-v0'.format(config.gym_env_id, args.trial)
-    helper.register_gym_environment(env_id, False, args.fps, args.show_score_bar)
-
-    # create environment and monitor
-    env = gym.make(env_id)
+    env_id = '{}-0-v0'.format(config.gym_env_id)
+    helper.register_gym_environment(env_id, False, args.fps, False)
+    env = gym.make(env_id)  # create environment and monitor
     config.num_episodes = args.num_episodes
     video_callable = video_schedule(config, args.record)
     env = Monitor(env, directory=output_dir, force=True, video_callable=video_callable)
-
-    # adds reference to monitor to allow for gym environments to update video frames
-    # TODO Yotam: not sure what this does
-    if video_callable(0):
+    if video_callable(0):  # adds reference to monitor to allow for gym environments to update video frames
         env.env.monitor = env
-
-    # initialize seeds (one for the environment, another for the agent)
-    env.seed(config.seed + args.trial)
+    env.seed(config.seed + args.trial)  # initialize seeds (one for the environment, another for the agent)
     agent_rng = np.random.RandomState(config.seed + args.trial)
-
     # creates the agent
     agent, exploration_strategy = create_agent(helper, agent_t, agent_rng)
+    #loads tables from file (some will be filled by the agent during the interaction)
+    agent.load(results_dir)
 
-    # if testing, loads tables from file (some will be filled by the agent during the interaction)
-    if agent_t == AgentType.Testing:
-        agent.load(results_dir)
 
     # runs episodes
     behavior_tracker = BehaviorTracker(config.num_episodes)
@@ -163,10 +137,5 @@ if __name__ == '__main__':
     args.clear_results = True
     args.default_frogger_config = FROGGER_CONFIG_DICT['DEFAULT']
 
-    # for agent_type in FROGGER_CONFIG_DICT:
-    #     if agent_type in ['EXPERT', 'DEFAULT']:
-    #         continue
-    #     args.default_frogger_config = FROGGER_CONFIG_DICT[agent_type]
-    #     args.num_episodes = args.default_frogger_config.num_episodes
-    #     args.trial+=1
+
     run_trial(args)

@@ -1,4 +1,8 @@
+from os.path import join
+
 import numpy as np
+
+from utils import make_or_clean_dir, save_image, create_video, make_clean_dirs
 
 
 def normalize_q_values(a, s):
@@ -40,7 +44,7 @@ def better_than_you_confidence(a1, a2, state):
     return a1_diff + a2_diff
 
 
-def disagreement_frames(env, agent, helper, window, time_step, old_s, old_obs, previous_frames, episode, crop_out):
+def disagreement_frames(env, agent, helper, window, time_step, old_s, old_obs, previous_frames, freeze_on_death):
     # obtain last pre-disagreement frames
     same_frames = []
     start = time_step - window
@@ -52,9 +56,9 @@ def disagreement_frames(env, agent, helper, window, time_step, old_s, old_obs, p
     done = False
     for step in range(window):
         # TODO added the part : old_s == 1295 - this is the death state
-        if done or old_s == 1295:  # adds same frame if done so that all vids are same length
+        if done or (freeze_on_death and old_s == 1295):  # adds same frame if done so that all vids are same length
             # disagreement_frames.append(env.video_recorder.last_frame)
-            # continue
+            # continue'
             break
         # record every step of the second agent
         a = agent.act(old_s)
@@ -62,11 +66,11 @@ def disagreement_frames(env, agent, helper, window, time_step, old_s, old_obs, p
 
         s = helper.get_state_from_observation(obs, r, done)
         agent.update(old_s, a, r, s)
-        helper.update_stats(episode, time_step, old_obs, obs, old_s, a, r, s)
+        helper.update_stats(0, time_step, old_obs, obs, old_s, a, r, s)
         old_s = s
         old_obs = obs
         # save video scenes
-        disagreement_frames.append(env.video_recorder.last_frame[:crop_out])
+        disagreement_frames.append(env.video_recorder.last_frame)
     return disagreement_frames
 
 
@@ -77,7 +81,7 @@ def disagreement_score(a1, a2, current_state, importance):
         return better_than_you_confidence(a1, a2, current_state)
 
 
-def get_disagreement_frames(a1_frames, a1_tracker, hl, traces_a2, window):
+def get_disagreement_frames(a1_frames, a1_tracker, hl, traces_a2, window, freeze_on_death):
     """get agent disagreement frames"""
     a1_hl, a2_hl, i = {}, {}, 0
     num_frames = len(a1_frames)
@@ -91,14 +95,17 @@ def get_disagreement_frames(a1_frames, a1_tracker, hl, traces_a2, window):
             same_frames = [a1_frames[0] for _ in range(abs(start))]
             start = 0
         a1_hl[i] = same_frames
+        end = frame_i + dis_len if frame_i + dis_len <= num_frames-1 else num_frames-1
 
-        # check for death
-        for j in range(frame_i, frame_i+dis_len):
-            if a1_tracker[j] == 1295 or j == num_frames-1:
-                end = j
-                break
-        else:
-            end = frame_i+dis_len
+        if freeze_on_death:
+            # check for death
+            for j in range(frame_i, frame_i+dis_len):
+                if a1_tracker[j] == 1295 or j == num_frames-1:
+                    end = j
+                    break
+            else:
+                end = frame_i+dis_len
+
         a1_hl[i] += a1_frames[start:end]
 
         # set to same length
@@ -111,3 +118,21 @@ def get_disagreement_frames(a1_frames, a1_tracker, hl, traces_a2, window):
 
         i += 1
     return a1_hl, a2_hl
+
+
+def save_disagreements(a1_DAs, a2_DAs, output_dir):
+    highlight_frames_dir = join(output_dir, "highlight_frames")
+    video_dir = join(output_dir, "videos")
+    make_clean_dirs(video_dir)
+    make_clean_dirs(highlight_frames_dir)
+
+    height, width, layers = a1_DAs[0][0].shape
+    size = (width, height)
+    trajectory_length = len(a1_DAs[0])
+    for hl_i in range(len(a1_DAs)):
+        for img_i in range(len(a1_DAs[hl_i])):
+            save_image(highlight_frames_dir, "a1_DA{}_Frame{}".format(str(hl_i), str(img_i)), a1_DAs[hl_i][img_i])
+            save_image(highlight_frames_dir, "a2_DA{}_Frame{}".format(str(hl_i), str(img_i)), a2_DAs[hl_i][img_i])
+
+        create_video(highlight_frames_dir, video_dir, "a1_DA" + str(hl_i), size, trajectory_length)
+        create_video(highlight_frames_dir, video_dir, "a2_DA" + str(hl_i), size, trajectory_length)

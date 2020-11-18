@@ -3,6 +3,7 @@ import os
 import pickle
 from os.path import join, dirname, exists
 
+import cv2
 import gym
 from gym.wrappers import Monitor
 from skimage import img_as_ubyte
@@ -17,18 +18,19 @@ from interestingness_xrl.scenarios.frogger.configurations import FROGGER_CONFIG,
     FROGGER_LIMITED_CONFIG, FROGGER_FEAR_WATER_CONFIG, FROGGER_HIGH_VISION_CONFIG
 from configurations.configurations import EXPERT_CONFIG
 
-
+from interestingness_xrl.scenarios import create_agent as original_create_agent
 
 from Agent_Comparisons.explorations import GreedyExploration
 
 FROGGER_CONFIG_DICT = {
-         'DEFAULT': FROGGER_CONFIG,
-         'FAST': FAST_FROGGER_CONFIG,
-         'LIMITED': FROGGER_LIMITED_CONFIG,
-         'FEAR_WATER': FROGGER_FEAR_WATER_CONFIG,
-         'HIGH_VISION': FROGGER_HIGH_VISION_CONFIG,
-         'EXPERT': EXPERT_CONFIG
+    'DEFAULT': FROGGER_CONFIG,
+    'FAST': FAST_FROGGER_CONFIG,
+    'LIMITED': FROGGER_LIMITED_CONFIG,
+    'FEAR_WATER': FROGGER_FEAR_WATER_CONFIG,
+    'HIGH_VISION': FROGGER_HIGH_VISION_CONFIG,
+    'EXPERT': EXPERT_CONFIG
 }
+
 
 class AgentType(object):
     """
@@ -70,29 +72,6 @@ def load_agent_config(results_dir, trial=0):
     return configuration, results_dir
 
 
-# class Trace(object):
-#     def __init__(self):
-#         self.obs = []
-#         self.actions = []
-#         self.rewards = []
-#         self.dones = []
-#         self.infos = []
-#         self.reward_sum = 0
-#         self.game_score = None
-#         self.length = 0
-#         self.states = []
-#
-#
-# class State(object):
-#     def __init__(self, name, obs, action_vector, feature_vector, img):
-#         self.observation = obs
-#         self.image = img
-#         self.observed_actions = action_vector
-#         self.name = name
-#         self.features = feature_vector
-
-
-
 def get_agent_output_dir(config, agent_t, trial_num=0):
     return join(_get_base_dir(config), AgentType.get_name(agent_t), str(trial_num))
 
@@ -107,17 +86,15 @@ def create_agent(helper, agent_t, rng):
     :return: a tuple (agent, exploration_strat) containing the created agent and respective exploration strategy.
     """
     config = helper.config
-    agent = None
-    exploration_strategy = None
-
     # compare: Q-agent (table loaded from learning) with fixed (greedy) SoftMax
     if agent_t == AgentType.Compare:
         exploration_strategy = GreedyExploration(config.min_temp, rng)
         agent = QValueBasedAgent(config.num_states, config.num_actions,
                                  action_names=config.get_action_names(), exploration_strategy=exploration_strategy)
-
-    # assigns agent to helper for collecting stats
-    helper.agent = agent
+        # assigns agent to helper for collecting stats
+        helper.agent = agent
+    else:
+        agent, exploration_strategy = original_create_agent(helper, agent_t, rng)
 
     return agent, exploration_strategy
 
@@ -133,19 +110,27 @@ def pickle_load(filename):
 
 
 def pickle_save(obj, path):
-    try:
-        os.makedirs(os.path.dirname(path))
-    except:
-        clean_dir(path)
     with open(path, "wb") as file:
         pickle.dump(obj, file)
 
-def create_video(output_dir, frames, name='video'):
-    imgs = []
-    kargs = {'macro_block_size': None, 'fps': 3}
-    for f in frames:
-        imgs.append(img_as_ubyte(f))
-    imageio.mimwrite(output_dir + "/" + name +'.mp4', imgs, 'MP4', **kargs)
+
+# def create_video(output_dir, frames, name='video'):
+#     imgs = []
+#     kargs = {'macro_block_size': None, 'fps': 3}
+#     for f in frames:
+#         imgs.append(img_as_ubyte(f))
+#     imageio.mimwrite(output_dir + "/" + name +'.mp4', imgs, 'MP4', **kargs)
+
+def create_video(frame_dir, video_dir, agent_hl, size, length):
+    img_array = []
+    for i in range(length):
+        img = cv2.imread(os.path.join(frame_dir, agent_hl + f'_Frame{i}.png'))
+        img_array.append(img)
+    out = cv2.VideoWriter(os.path.join(video_dir, agent_hl) + '.mp4', cv2.VideoWriter_fourcc(*'mp4v'), 3, size)
+
+    for i in range(len(img_array)):
+        out.write(img_array[i])
+    out.release()
 
 
 def save_image(path, name, img):
@@ -158,31 +143,17 @@ def clean_dir(path, file_type=''):
         os.remove(f)
 
 
-def make_or_clean_dir(path):
+def make_clean_dirs(path, no_clean=False, file_type=None):
     try:
         os.makedirs(path)
     except:
-        clean_dir(path)
-
-def save_highlights(a1_hl, a2_hl, output_dir):
-    highlight_frames_dir = os.path.join(output_dir, "highlight_frames")
-    video_dir = os.path.join(output_dir, "videos")
-    make_or_clean_dir(video_dir)
-    make_or_clean_dir(highlight_frames_dir)
-
-    for hl_i in range(len(a1_hl)):
-        for img_i in range(len(a1_hl[hl_i])):
-            save_image(highlight_frames_dir, "a1_HL{}_FRAME{}".format(str(hl_i),str(img_i)), a1_hl[hl_i][img_i])
-            save_image(highlight_frames_dir, "a2_HL{}_FRAME{}".format(str(hl_i),str(img_i)), a2_hl[hl_i][img_i])
-
-        create_video(video_dir, a1_hl[hl_i], "a1_HL"+str(hl_i))
-        create_video(video_dir, a2_hl[hl_i], "a2_HL"+str(hl_i))
+        if not no_clean: clean_dir(path, file_type)
 
 
-def load_agent_aux(config, agent_dir, trial, seed, agent_rng, params, no_output=False):
+def load_agent_aux(config, agent_type, agent_dir, trial, seed, agent_rng, params, no_output=False):
     helper = create_helper(config)
     if not no_output:
-        output_dir = params.output if params.output is not None else get_agent_output_dir(config, 5, trial)
+        output_dir = params.output if params.output is not None else get_agent_output_dir(config, agent_type, trial)
     else:
         output_dir = join(dirname(dirname(agent_dir)), 'compare/temp')
     if not exists(output_dir):
@@ -197,7 +168,7 @@ def load_agent_aux(config, agent_dir, trial, seed, agent_rng, params, no_output=
     env = Monitor(env, directory=output_dir, force=True, video_callable=video_callable)
     env.env.monitor = env
     env.seed(seed)
-    agent, exploration_strategy = create_agent(helper, 5, agent_rng)
+    agent, exploration_strategy = create_agent(helper, agent_type, agent_rng)
     agent.load(agent_dir)
     behavior_tracker = BehaviorTracker(config.num_episodes)
     return env, helper, agent, behavior_tracker, output_dir, video_callable
@@ -205,5 +176,6 @@ def load_agent_aux(config, agent_dir, trial, seed, agent_rng, params, no_output=
 
 def video_schedule(config, videos):
     # linear capture schedule
-    return lambda e: videos and \
-                     (e == config.num_episodes - 1 or e % int(config.num_episodes / config.num_recorded_videos) == 0)
+    return (lambda e: True) if videos == 'all' else \
+        (lambda e: videos and (e == config.num_episodes - 1 or
+                               e % int(config.num_episodes / config.num_recorded_videos) == 0))
