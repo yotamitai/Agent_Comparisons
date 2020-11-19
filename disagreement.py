@@ -2,7 +2,7 @@ from os.path import join
 
 import numpy as np
 
-from utils import make_or_clean_dir, save_image, create_video, make_clean_dirs
+from utils import save_image, create_video, make_clean_dirs
 
 
 def normalize_q_values(a, s):
@@ -81,11 +81,11 @@ def disagreement_score(a1, a2, current_state, importance):
         return better_than_you_confidence(a1, a2, current_state)
 
 
-def get_disagreement_frames(a1_frames, a1_tracker, hl, traces_a2, window, freeze_on_death):
+def get_disagreement_frames(a1_frames, a1_tracker, da, traces_a2, window, freeze_on_death):
     """get agent disagreement frames"""
     a1_hl, a2_hl, i = {}, {}, 0
     num_frames = len(a1_frames)
-    for d_i, frame_i in hl:
+    for d_i, frame_i in da:
         print(f'chosen disagreement frame: {frame_i}')
         dis_len = len(traces_a2[d_i]) - window
         same_frames = []
@@ -136,3 +136,5 @@ def save_disagreements(a1_DAs, a2_DAs, output_dir):
 
         create_video(highlight_frames_dir, video_dir, "a1_DA" + str(hl_i), size, trajectory_length)
         create_video(highlight_frames_dir, video_dir, "a2_DA" + str(hl_i), size, trajectory_length)
+
+    return video_dir

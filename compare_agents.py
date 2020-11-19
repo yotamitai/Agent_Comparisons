@@ -1,7 +1,9 @@
 import argparse
 import gym
 import numpy as np
+
 from disagreement import get_disagreement_frames, disagreement_frames, disagreement_score, save_disagreements
+from merge_and_fade import merge_and_fade
 from utils import load_agent_config, load_agent_aux
 
 
@@ -78,8 +80,8 @@ def online_comparison(args):
     a1_old_s = a1_helper.get_state_from_observation(a1_old_obs, 0, False)
     t = 0
     a1_done = False
-    while not a1_done:
-        # for i in range(50):  # for testing
+    # while not a1_done:
+    for i in range(50):  # for testing
         # select action
         a1_a = a1_agent.act(a1_old_s)
         a2_a = a2_agent.act(a1_old_s)
@@ -135,14 +137,11 @@ def online_comparison(args):
                                                                  disagreements, a2_traces, frame_window,
                                                                  args.freeze_on_death)
 
-    """overlay video"""
-    # get_overlaying_video(args.n_disagreements, args.horizon, a1_disagreements, a2_disagreements, a1_output_dir)
-
     """save disagreements"""
-    save_disagreements(a1_disagreements, a2_disagreements, a1_output_dir)
+    video_dir = save_disagreements(a1_disagreements, a2_disagreements, a1_output_dir)
 
-    # comparison_frames = merge_frames(a1_highlights, a2_highlights, args.horizon)
-    # create_video(a1_output_dir, comparison_frames)
+    """generate video"""
+    merge_and_fade(video_dir, args.n_disagreements, fade_in_frame=0, fade_out_frame=10, fade_duration=2)
 
     """ writes results to files"""
     a1_agent.save(a1_output_dir)

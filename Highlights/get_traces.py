@@ -13,7 +13,7 @@ def get_traces(environment, agent, agent_args, args):
         execution_traces = pickle_load(join(args.results_dir,'Traces.pkl'))
         states_dictionary = pickle_load(join(args.results_dir,'States.pkl'))
         if args.verbose:
-            print(f"Traces & States {15*'-'+'>'} Loaded")
+            print(f"Highlights {15*'-'+'>'} Traces & States Loaded")
     else:
         """Obtain traces and state dictionary"""
         execution_traces, states_dictionary = [], {}
@@ -24,7 +24,7 @@ def get_traces(environment, agent, agent_args, args):
         pickle_save(execution_traces, join(args.results_dir, 'Traces.pkl'))
         pickle_save(states_dictionary, join(args.results_dir, 'States.pkl'))
         if args.verbose:
-            print(f"Traces & States {15*'-'+'>'} Saved")
+            print(f"Highlights {15*'-'+'>'} Traces & States Saved")
 
     return execution_traces, states_dictionary
 

@@ -49,20 +49,24 @@ def get_highlights(args):
 
     """Save Highlight videos"""
     frames_dir = join(args.output_dir, 'Highlight_Frames')
+    videos_dir = join(args.output_dir, "Highlight_Videos")
     height, width, layers = list(states.values())[0].image.shape
     img_size = (width, height)
     get_trajectory_images(summary_trajectories, states, frames_dir)
-    create_video(frames_dir, join(args.output_dir, "Highlight_Videos"), args.num_trajectories, img_size)
-    if args.verbose: print(f"HIGHLIGHTS {15 * '-' + '>'} Video Obtained")
+    create_video(frames_dir, videos_dir, args.num_trajectories, img_size)
+    if args.verbose: print(f"HIGHLIGHTS {15 * '-' + '>'} Videos Generated")
 
     """Merge Highlights to a single video with fade in/ fade out effects"""
     # TODO is this s good frame to start fading out?
-    merge_and_fade(args.output_dir, args.num_trajectories, fade_out_frame=10)
+    merge_and_fade(videos_dir, args.num_trajectories, fade_out_frame=10)
 
     """Save data used for this run"""
-    pickle_save(traces, join(args.output, 'Traces.pkl'))
-    pickle_save(states, join(args.output, 'States.pkl'))
+    pickle_save(traces, join(args.output_dir, 'Traces.pkl'))
+    pickle_save(states, join(args.output_dir, 'States.pkl'))
     pickle_save(all_trajectories, join(args.output_dir, 'Trajectories.pkl'))
+    if args.verbose: print(f"Highlights {15 * '-' + '>'} Run Configuration Saved")
+
+    env.close()
 
 
 if __name__ == '__main__':
