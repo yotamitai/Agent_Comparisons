@@ -1,5 +1,5 @@
 from os.path import join
-
+import xxhash
 from Highlights.HL_utils import Trace, State, pickle_save, pickle_load
 
 
@@ -12,19 +12,17 @@ def get_traces(environment, agent, agent_args, args):
         """Load traces and state dictionary"""
         execution_traces = pickle_load(join(args.results_dir,'Traces.pkl'))
         states_dictionary = pickle_load(join(args.results_dir,'States.pkl'))
-        if args.verbose:
-            print(f"Highlights {15*'-'+'>'} Traces & States Loaded")
+        if args.verbose: print(f"Highlights {15*'-'+'>'} Traces & States Loaded")
     else:
         """Obtain traces and state dictionary"""
         execution_traces, states_dictionary = [], {}
         for i in range(args.n_traces):
             get_single_trace(environment, agent, i, execution_traces, states_dictionary, agent_args, args)
-            print(f"Trace {i} {15*'-'+'>'} Obtained")
+            if args.verbose: print(f"\tTrace {i} {15*'-'+'>'} Obtained")
         """save to results dir"""
         pickle_save(execution_traces, join(args.results_dir, 'Traces.pkl'))
         pickle_save(states_dictionary, join(args.results_dir, 'States.pkl'))
-        if args.verbose:
-            print(f"Highlights {15*'-'+'>'} Traces & States Saved")
+        if args.verbose: print(f"Highlights {15*'-'+'>'} Traces & States Generated")
 
     return execution_traces, states_dictionary
 
@@ -54,7 +52,7 @@ def get_single_trace(env, agent, trace_idx, agent_traces, states_dict, kwargs, a
         # *******************************
         """Add step to trace"""
         state_img = env.video_recorder.last_frame
-        state_id = old_s_temp
+        state_id = xxhash.xxh64(state_img.tobytes(), seed=0).hexdigest()
         state_q_values = agent.q[old_s_temp]
         features = None
         trace.reward_sum += r

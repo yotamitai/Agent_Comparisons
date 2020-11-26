@@ -86,7 +86,6 @@ def get_disagreement_frames(a1_frames, a1_tracker, da, traces_a2, window, freeze
     a1_hl, a2_hl, i = {}, {}, 0
     num_frames = len(a1_frames)
     for d_i, frame_i in da:
-        print(f'chosen disagreement frame: {frame_i}')
         dis_len = len(traces_a2[d_i]) - window
         same_frames = []
         a2_hl[i] = traces_a2[d_i]
@@ -120,7 +119,7 @@ def get_disagreement_frames(a1_frames, a1_tracker, da, traces_a2, window, freeze
     return a1_hl, a2_hl
 
 
-def save_disagreements(a1_DAs, a2_DAs, output_dir):
+def save_disagreements(a1_DAs, a2_DAs, output_dir, fps):
     highlight_frames_dir = join(output_dir, "highlight_frames")
     video_dir = join(output_dir, "videos")
     make_clean_dirs(video_dir)
@@ -134,7 +133,19 @@ def save_disagreements(a1_DAs, a2_DAs, output_dir):
             save_image(highlight_frames_dir, "a1_DA{}_Frame{}".format(str(hl_i), str(img_i)), a1_DAs[hl_i][img_i])
             save_image(highlight_frames_dir, "a2_DA{}_Frame{}".format(str(hl_i), str(img_i)), a2_DAs[hl_i][img_i])
 
-        create_video(highlight_frames_dir, video_dir, "a1_DA" + str(hl_i), size, trajectory_length)
-        create_video(highlight_frames_dir, video_dir, "a2_DA" + str(hl_i), size, trajectory_length)
+        create_video(highlight_frames_dir, video_dir, "a1_DA" + str(hl_i), size, trajectory_length, fps)
+        create_video(highlight_frames_dir, video_dir, "a2_DA" + str(hl_i), size, trajectory_length, fps)
 
     return video_dir
+
+def get_top_k_disagreements(importance_scores, disagreement_indexes, behavior_tracker, args):
+    importance_sorted_indexes = sorted(list(importance_scores.items()), key=lambda x: x[1], reverse=True)
+    seen, top_k_diverse_state_indexes = [], []
+    for idx, score in importance_sorted_indexes:
+        disagreement_state = behavior_tracker.s_s[0][disagreement_indexes[idx]]
+        if disagreement_state not in seen:
+            seen.append(disagreement_state) # TODO is this a good diversity measure? mmm...
+            top_k_diverse_state_indexes.append(idx)
+        if len(top_k_diverse_state_indexes) == args.n_disagreements:
+            break
+    return sorted([(x, disagreement_indexes[x]) for x in top_k_diverse_state_indexes])

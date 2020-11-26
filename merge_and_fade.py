@@ -3,7 +3,7 @@ import subprocess
 from os.path import join
 
 
-def merge_and_fade(videos_dir, n_HLs, fade_in_frame=0, fade_out_frame=10, fade_duration=2, verbose=False, opacity=0.7):
+def merge_and_fade(videos_dir, n_HLs, fade_out_frame, fade_duration=2, verbose=False, opacity=0.7):
     """Creates bash file to merge the HL videos and add fade in fade out effects using ffmpeg"""
 
     """Create the necissary files"""
@@ -18,7 +18,7 @@ def merge_and_fade(videos_dir, n_HLs, fade_in_frame=0, fade_out_frame=10, fade_d
 
     for i in range(n_HLs):
         f1.write(f"ffmpeg -i temp/merged{i}.mp4 -filter:v "
-                 f"'fade=in:{fade_in_frame}:{fade_duration},fade=out:{fade_out_frame}:{fade_duration}' "
+                 f"'fade=in:{0}:{fade_duration},fade=out:{fade_out_frame}:{fade_duration}' "
                  f"-c:v libx264 -crf 22 -preset veryfast -c:a copy temp/fadeInOut_HL_{i}.mp4\n")
     f1.write(f"ffmpeg -f concat -safe 0 -i list.txt -c copy FUll_DA_VIDEO.mp4")
     f1.close()

@@ -1,4 +1,5 @@
 from os.path import join
+import numpy as np
 
 from Highlights.HL_utils import make_clean_dirs, pickle_load, pickle_save
 
@@ -65,16 +66,19 @@ class Trajectory(object):
 
 def trajectories_by_importance(execution_traces, state_importance, args):
     if args.load_trajectories:
-        all_trajectories = pickle_load(join(args.results_dir,'Trajectories.pkl'))
+        all_trajectories = pickle_load(join(args.results_dir, 'Trajectories.pkl'))
+        if args.verbose: print(f"HIGHLIGHTS {15 * '-' + '>'} Trajectories Loaded")
     else:
         all_trajectories = get_all_trajectories(execution_traces, args.trajectory_length, state_importance)
-        pickle_save(all_trajectories, join(args.results_dir,'Trajectories.pkl'))
+        pickle_save(all_trajectories, join(args.results_dir, 'Trajectories.pkl'))
+        if args.verbose: print(f"HIGHLIGHTS {15 * '-' + '>'} Trajectories Generated")
 
     sorted_by_method = sorted([(x.importance[args.trajectory_importance], x) for x in all_trajectories],
                               key=lambda y: y[0], reverse=True)
     sorted_trajectories = [x[1] for x in sorted_by_method]
-    summary_trajectories = trajectory_highlights(sorted_trajectories, args.allowed_similar_states,
-                                                 args.num_trajectories)
+    trajectories_scores = [x[0] for x in sorted_by_method]
+    summary_trajectories = trajectory_highlights(sorted_trajectories, trajectories_scores, args.allowed_similar_states,
+                                                 args.num_trajectories, args.highlights_selection_method)
     return all_trajectories, summary_trajectories
 
 
@@ -87,19 +91,30 @@ def get_all_trajectories(traces, length, importance):
     return trajectories
 
 
-def trajectory_highlights(trajectories, similarity_limit, budget):
-    # TODO check for similarity between chosen ones
+def trajectory_highlights(trajectories, scores, similarity_limit, budget, method):
     summary = [trajectories[0]]
-    for i in range(1, len(trajectories)):
-        for t in summary:
-            if len(set(t.states).intersection(trajectories[i].states)) > similarity_limit:
-                break
-        else:
-            summary.append(trajectories[i])
-        if len(summary) == budget:
-            break
+    seen_score = {scores[1]}
 
-    assert len(summary) == budget, "Not enough dis-similar trajectories found"
+    if method == 'only_score':
+        _, indx = np.unique(scores, return_index=True)
+        indx = indx[-1:-budget-1:-1]
+        summary = [trajectories[i] for i in indx]
+    else:
+        for i in range(1, len(trajectories)):
+            if method == 'score_and_similarity':
+                np.unique(scores, return_inverse=True)
+                if scores[i] in seen_score:
+                    continue
+                else: seen_score.add(scores[i])
+            for t in summary:
+                if len(set(t.states).intersection(trajectories[i].states)) > similarity_limit:
+                    break
+            else:
+                summary.append(trajectories[i])
+            if len(summary) == budget:
+                break
+
+        assert len(summary) == budget, "Not enough dis-similar trajectories found"
     return summary
 
 

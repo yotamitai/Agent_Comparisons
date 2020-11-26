@@ -1,8 +1,11 @@
 import argparse
+import logging
+from datetime import datetime
 import gym
 import numpy as np
 
-from disagreement import get_disagreement_frames, disagreement_frames, disagreement_score, save_disagreements
+from disagreement import get_disagreement_frames, disagreement_frames, disagreement_score, save_disagreements, \
+    get_top_k_disagreements
 from merge_and_fade import merge_and_fade
 from utils import load_agent_config, load_agent_aux
 
@@ -26,36 +29,21 @@ def reload_agent(config, agent_dir, trial, seed, rng, t, actions, params):
     return env, helper, agent, behavior_tracker
 
 
-# def get_overlaying_video(n_highlights, n_frames, a1_highlights, a2_highlights, output_dir):
-#     """overlay a1 and a2 HL over each other"""
-#     video_dir = os.path.join(output_dir, "videos")
-#     overlay_hls = {}
-#     for hl_i in range(n_highlights):
-#         # get similar frames - up until disagreement
-#         overlay_hls[hl_i] = a1_highlights[hl_i][:n_frames//2]
-#         # for disagreements - find difference in pixels
-#         for f_i in range(n_frames//2,n_frames):
-#             diff_mat = a1_highlights[hl_i][f_i]-a2_highlights[hl_i][f_i]
-#             # [[(i,j) for i in range(a1_highlights[0][0].shape[1]) if diff_mat[j][i].sum()] for j in range(a1_highlights[0][0].shape[0]-20)]
-#             new_frame = copy.copy(a1_highlights[hl_i][f_i])
-#             for r in range(a1_highlights[0][0].shape[0]-20):
-#                 for c in range(a1_highlights[0][0].shape[1]):
-#                     if diff_mat[r][c].sum():
-#                         if a1_highlights[hl_i][f_i][r][c] ==
-#
-#
-#                     if not (a1_highlights[hl_i][f_i][r][c] == a2_highlights[hl_i][f_i][r][c]).all():
-#                         # add the change of a2 to a1 but change the color a bit (* 1.1)
-#                         #TODO how to change only one agent color?
-#                         # get diff matrix (subtraction) and only look at non zero pixels
-#                         # create box for areas of change and color those
-#                         new_frame[r][c] = (a2_highlights[hl_i][f_i][r][c] * 1.1).astype(int)
-#             overlay_hls[hl_i].append(new_frame)
-#
-#         create_video(video_dir, overlay_hls[hl_i], "overlayed_" + str(hl_i))
+def get_logging(params):
+    name = '_'.join([params.a1_config.split('/')[-1], params.a2_config.split('/')[-1]])
+    log_name = 'logs/' + '_'.join([name, datetime.now().strftime("%d-%m %H:%M").replace(' ', '_')])
+    logging.basicConfig(filename=log_name + '.log', filemode='w', format='%(name)s - %(levelname)s - %(message)s',
+                        level=logging.INFO)
+    return name
+
 
 def online_comparison(args):
     """Compare two agents running online, search for disagreements"""
+    """logging"""
+    name = get_logging(args)
+    if args.verbose: print(name)
+    logging.info(name)
+
     """get agents"""
     a1_config, a1_agent_dir = load_agent_config(args.a1_config, args.a1_trial)
     a2_config, a2_agent_dir = load_agent_config(args.a2_config, args.a2_trial)
@@ -69,10 +57,8 @@ def online_comparison(args):
     """Run"""
     disagreement_indexes, importance_scores, a2_traces, all_a1_frames = {}, {}, {}, []
     dis_i, frame_window = 0, int(args.horizon / 2)  # dis_i = disagreement index of frame
-
     # set monitor
     a1_env.env.monitor = a1_env
-
     # reset environment
     a1_old_obs = a1_env.reset()
     _ = a2_env.reset()
@@ -80,14 +66,15 @@ def online_comparison(args):
     a1_old_s = a1_helper.get_state_from_observation(a1_old_obs, 0, False)
     t = 0
     a1_done = False
-    # while not a1_done:
-    for i in range(50):  # for testing
+    while not a1_done:
+    # for i in range(20):  # for testing
         # select action
         a1_a = a1_agent.act(a1_old_s)
         a2_a = a2_agent.act(a1_old_s)
         # check for disagreement
         if a1_a != a2_a:  # and dis_i < args.n_highlights:
-            print(f'Disagreement at frame {t}')
+            if args.verbose: print(f'Disagreement at frame {t}')
+            logging.info(f'Disagreement at frame {t}')
             disagreement_indexes[dis_i] = t
             preceding_actions = a1_behavior_tracker.s_a[0]
             a2_traces[dis_i] = disagreement_frames(a2_env, a2_agent, a2_helper, frame_window, t, a1_old_s,
@@ -120,17 +107,9 @@ def online_comparison(args):
         t += 1
 
     """top k diverse disagreements"""
-    importance_sorted_indexes = sorted(list(importance_scores.items()), key=lambda x: x[1], reverse=True)
-    seen, top_k_diverse_state_indexes = [], []
-
-    for idx, score in importance_sorted_indexes:
-        disagreement_state = a1_behavior_tracker.s_s[0][disagreement_indexes[idx]]
-        if disagreement_state not in seen:
-            seen.append(disagreement_state)
-            top_k_diverse_state_indexes.append(idx)
-        if len(top_k_diverse_state_indexes) == args.n_disagreements:
-            break
-    disagreements = sorted([(x, disagreement_indexes[x]) for x in top_k_diverse_state_indexes])
+    disagreements = get_top_k_disagreements(importance_scores, disagreement_indexes, a1_behavior_tracker, args)
+    if args.verbose: print(f'chosen disagreement frames: {[x[1] for x in disagreements]}')
+    logging.info(f'chosen disagreement frames: {[x[1] for x in disagreements]}')
 
     """get disagreement frames"""
     a1_disagreements, a2_disagreements = get_disagreement_frames(all_a1_frames, a1_behavior_tracker.s_s[0],
@@ -138,16 +117,25 @@ def online_comparison(args):
                                                                  args.freeze_on_death)
 
     """save disagreements"""
-    video_dir = save_disagreements(a1_disagreements, a2_disagreements, a1_output_dir)
+    video_dir = save_disagreements(a1_disagreements, a2_disagreements, a1_output_dir, args.fps)
+    if args.verbose: print(f'Disagreements saved')
+    logging.info(f'Disagreements saved')
 
     """generate video"""
-    merge_and_fade(video_dir, args.n_disagreements, fade_in_frame=0, fade_out_frame=10, fade_duration=2)
+    fade_duration = 2
+    fade_out_frame = args.horizon - fade_duration
+    merge_and_fade(video_dir, args.n_disagreements, fade_out_frame, fade_duration=fade_duration)
+    if args.verbose: print(f'DAs Video Generated')
+    logging.info(f'DAs Video Generated')
 
     """ writes results to files"""
     a1_agent.save(a1_output_dir)
-    print('\nResults of trial {} written to:\n\t\'{}\''.format(args.a1_trial, a1_output_dir))
+    if args.verbose: print('\nResults of trial {} written to:\n\t\'{}\''.format(args.a1_trial, a1_output_dir))
+    logging.info('\nResults of trial {} written to:\n\t\'{}\''.format(args.a1_trial, a1_output_dir))
     a1_env.close()
     a2_env.close()
+    del gym.envs.registration.registry.env_specs[a1_env.spec.id]
+    del gym.envs.registration.registry.env_specs[a2_env.spec.id]
 
 
 if __name__ == '__main__':
@@ -163,18 +151,18 @@ if __name__ == '__main__':
     parser.add_argument('-c', '--config_file_path', help='path to config file')
     parser.add_argument('-rv', '--record', help='record videos according to linear schedule', default=True)
     parser.add_argument('-v', '--verbose', help='print information to the console', default=True)
-    parser.add_argument('-hzn', '--horizon', help='number of frames to show per highlight', type=int,
-                        default=20)
+    parser.add_argument('-hzn', '--horizon', help='number of frames to show per highlight', type=int, default=20)
     args = parser.parse_args()
 
     """experiment parameters"""
     args.a1_config = '/home/yotama/Local_Git/InterestingnessXRL/Agent_Comparisons/agents/Expert'
-    args.a2_config = '/home/yotama/Local_Git/InterestingnessXRL/Agent_Comparisons/agents/Novice'
-    args.fps = 3
-    args.horizon = 14
+    args.a2_config = '/home/yotama/Local_Git/InterestingnessXRL/Agent_Comparisons/agents/FearWater'
+    args.fps = 2
+    args.horizon = 10
     args.show_score_bar = False
-    args.n_disagreements = 7
+    args.n_disagreements = 5
     args.importance = "bety"  # "sb" "bety"
     args.freeze_on_death = False  # when an agent dies, keep getting frames or freeze
 
+    """RUN"""
     online_comparison(args)

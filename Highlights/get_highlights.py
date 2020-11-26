@@ -40,7 +40,6 @@ def get_highlights(args):
     else:
         """highlights importance by trajectory"""
         all_trajectories, summary_trajectories = trajectories_by_importance(traces, state_importance_dict, args)
-    if args.verbose: print(f"HIGHLIGHTS {15 * '-' + '>'} obtained")
 
     """Save data used for this run"""
     pickle_save(traces, join(args.output_dir, 'Traces.pkl'))
@@ -57,14 +56,14 @@ def get_highlights(args):
     if args.verbose: print(f"HIGHLIGHTS {15 * '-' + '>'} Videos Generated")
 
     """Merge Highlights to a single video with fade in/ fade out effects"""
-    # TODO is this s good frame to start fading out?
-    merge_and_fade(videos_dir, args.num_trajectories, fade_out_frame=10)
+    fade_out_frame = args.trajectory_length - args.fade_duration
+    merge_and_fade(videos_dir, args.num_trajectories, fade_out_frame, args.fade_duration)
 
     """Save data used for this run"""
     pickle_save(traces, join(args.output_dir, 'Traces.pkl'))
     pickle_save(states, join(args.output_dir, 'States.pkl'))
     pickle_save(all_trajectories, join(args.output_dir, 'Trajectories.pkl'))
-    if args.verbose: print(f"Highlights {15 * '-' + '>'} Run Configuration Saved")
+    if args.verbose: print(f"Highlights {15 * '-' + '>'} Run Configurations Saved")
 
     env.close()
 
@@ -95,12 +94,14 @@ if __name__ == '__main__':
     args.n_traces = 20
     args.trajectory_importance = "max_min"
     args.state_importance = "second"
-    args.num_trajectories = 7
-    args.trajectory_length = 2 * args.num_trajectories
-    args.minimum_gap = 10
-    args.allowed_similar_states = 5
+    args.num_trajectories = 10
+    args.trajectory_length = 10
+    args.fade_duration = 2
+    args.minimum_gap = 0
+    args.allowed_similar_states = 3
+    args.highlights_selection_method = 'importance_scores' # 'scores_and_similarity', 'similarity'
     args.load_traces = True
-    args.load_trajectories = True
+    args.load_trajectories = False
 
     args.output_dir = join(args.results_dir, datetime.now().strftime("%H:%M:%S_%d-%m-%Y"))
     make_clean_dirs(args.output_dir)
