@@ -2,6 +2,7 @@ from os.path import join
 
 import numpy as np
 
+from get_trajectories import State, DisagreementTrajectory
 from utils import save_image, create_video, make_clean_dirs
 
 
@@ -138,6 +139,7 @@ def save_disagreements(a1_DAs, a2_DAs, output_dir, fps):
 
     return video_dir
 
+
 def get_top_k_disagreements(importance_scores, disagreement_indexes, behavior_tracker, args):
     importance_sorted_indexes = sorted(list(importance_scores.items()), key=lambda x: x[1], reverse=True)
     seen, top_k_diverse_state_indexes = [], []
@@ -149,3 +151,105 @@ def get_top_k_disagreements(importance_scores, disagreement_indexes, behavior_tr
         if len(top_k_diverse_state_indexes) == args.n_disagreements:
             break
     return sorted([(x, disagreement_indexes[x]) for x in top_k_diverse_state_indexes])
+
+
+######## STATES
+
+def disagreement_states(env, agent, helper, window, time_step, old_s, old_obs, previous_states, freeze_on_death):
+    # obtain last pre-disagreement states
+    same_states = []
+    start = time_step - window
+    if start < 0:
+        same_states = [previous_states[0] for _ in range(abs(start))]
+        start = 0
+    da_states = same_states + previous_states[start:]
+    # run for for frame_window frames
+    done = False
+    for step in range(time_step, time_step+window):
+        # TODO added the part : old_s == 1295 - this is the death state
+        if done or (freeze_on_death and (old_s == 1295 or old_s == 1036)):  # adds same frame if done so that all vids are same length
+            break
+        # record every step of the second agent
+        a = agent.act(old_s)
+        obs, r, done, _ = env.step(a)
+        s = helper.get_state_from_observation(obs, r, done)
+        agent.update(old_s, a, r, s)
+        helper.update_stats(0, step, old_obs, obs, old_s, a, r, s)
+        frame = env.video_recorder.last_frame
+        da_states.append(State(step, old_obs, old_s, agent.q[old_s], frame))
+        old_s = s
+        old_obs = obs
+        # save video scenes
+    return da_states
+
+
+def normalize_state_q_values(s):
+    q = s.action_values
+    q_sum = np.sum(q)
+    # TODO yotam: this is a stitch up because there can be states where all q values are 0
+    if not q_sum:
+        return np.array([0, 0, 0, 0])
+    normalized = np.true_divide(q, q_sum)
+    return normalized
+
+
+def second_best_state_confidence(state1, state2):
+    """compare best action to second-best action"""
+    # normalize to get probabilities
+    s1_actions_normalized = normalize_state_q_values(state1)
+    s2_actions_normalized = normalize_state_q_values(state2)
+    # get difference between best action and second best
+    sorted_q1 = sorted(s1_actions_normalized, reverse=True)
+    sorted_q2 = sorted(s2_actions_normalized, reverse=True)
+    s1_diff = sorted_q1[0] - sorted_q1[1]
+    s2_diff = sorted_q2[0] - sorted_q2[1]
+    return s1_diff + s2_diff
+
+
+def better_than_you_state_confidence(state1, state2):
+    """compare best action to the action chosen by the opposing agent"""
+    # normalize to get probabilities
+    s1_actions_normalized = normalize_state_q_values(state1)
+    s2_actions_normalized = normalize_state_q_values(state2)
+    # get difference between best action and second best
+    s1_diff = s1_actions_normalized.max() - s1_actions_normalized[np.argmax(s2_actions_normalized)]
+    s2_diff = s2_actions_normalized.max() - s2_actions_normalized[np.argmax(s1_actions_normalized)]
+    return s1_diff + s2_diff
+
+
+def get_trajectory_importance(t1, t2, kargs):
+    trajectory_importance = []
+    for i in range((kargs.horizon//2)-1, len(t1)):
+        if kargs.state_importance == 'sb':
+            trajectory_importance.append(second_best_state_confidence(t1[i], t2[i]))
+        elif kargs.state_importance == 'bety':
+            trajectory_importance.append(better_than_you_state_confidence(t1[i], t2[i]))
+
+    return trajectory_importance
+
+
+def get_top_k_disagreement_trajectories(a2_trajectories, a1_states, args):
+    disagreement_trajectories = []
+    for a2_traj in a2_trajectories:
+        start = a2_traj[0].name
+        end = start + len(a2_traj)
+        if len(a1_states) <= end:
+            end = len(a1_states) -1
+        a1_traj = a1_states[start:end]
+        a2_traj = a2_traj[:len(a1_traj)]
+        trajectory_score = get_trajectory_importance(a2_traj, a1_traj, args)
+        disagreement_trajectories.append(DisagreementTrajectory(a1_traj, a2_traj, trajectory_score))
+
+    importance_sorted_trajectories = \
+        sorted(disagreement_trajectories, key=lambda x: x.importance[args.trajectory_importance], reverse=True)
+    seen, top_k_diverse_trajectories = [], []
+    for trajectory in importance_sorted_trajectories:
+        score = trajectory.importance[args.trajectory_importance]
+        if score in seen:
+            continue
+        top_k_diverse_trajectories.append(trajectory)
+        seen.append(trajectory.importance[args.trajectory_importance])
+        if len(top_k_diverse_trajectories) == args.n_disagreements:
+            break
+    return top_k_diverse_trajectories
+

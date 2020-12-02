@@ -1,16 +1,37 @@
 from os.path import join
+
+import imageio
 import numpy as np
+import matplotlib.pyplot as plt
 
-from Highlights.HL_utils import make_clean_dirs, pickle_load, pickle_save
+from Agent_Comparisons.utils import make_clean_dirs, pickle_load, pickle_save
 
 
-class Trajectory(object):
-    def __init__(self, states, importance_dict):
-        self.states = states
-        self.state_importance = importance_dict
+class State(object):
+    def __init__(self, name, obs, state, action_values, img):
+        self.observation = obs
+        self.image = img
+        self.state = state
+        self.action_values = action_values
+        self.name = name
+
+    def plot_image(self):
+        plt.imshow(self.image)
+        plt.show()
+
+    def save_image(self, path, name):
+        imageio.imwrite(path + '/' + name + '.png', self.image)
+
+
+class DisagreementTrajectory(object):
+    def __init__(self, a1_states, a2_states, states_importance):
+        self.disagreement_index = a1_states[len(a1_states)//2].name
+        self.a1_states = a1_states
+        self.a2_states = a2_states
+        self.states_importance = states_importance
         self.importance = {
             'max_min': 0,
-            'max_minus_avg': 0,
+            'max_avg': 0,
             'avg': 0,
             'sum': 0,
             'avg_delta': 0,
@@ -21,11 +42,15 @@ class Trajectory(object):
         self.trajectory_importance_avg()
         self.trajectory_importance_avg_delta()
 
+    def get_frames(self):
+        return [x.image for x in self.a1_states], [x.image for x in self.a2_states]
+
+
     def trajectory_importance_max_min(self):
-        """ computes the importance of the trajectory, according to max-min approach """
+        """ computes the importance of the trajectory, according to max-min approach: delta(max state, min state) """
         max, min = float("-inf"), float("inf")
-        for state in self.states:
-            state_importance = self.state_importance[state]
+        for i in range(len(self.states_importance)):
+            state_importance = self.states_importance[i]
             if state_importance < min:
                 min = state_importance
             if state_importance > max:
@@ -35,32 +60,32 @@ class Trajectory(object):
     def trajectory_importance_max_avg(self):
         """ computes the importance of the trajectory, according to max-avg approach """
         max, sum = float("-inf"), 0
-        for state in self.states:
-            state_importance = self.state_importance[state]
+        for i in range(len(self.states_importance)):
+            state_importance = self.states_importance[i]
             # add to the curr sum for the avg in the future
             sum += state_importance
             if state_importance > max:
                 max = state_importance
-        avg = float(sum) / len(self.states)
-        self.importance['max_minus_avg'] = max - avg
+        avg = float(sum) / len(self.a1_states)
+        self.importance['max_avg'] = max - avg
 
     def trajectory_importance_avg(self):
         """ computes the importance of the trajectory, according to avg approach """
         sum = 0
-        for state in self.states:
-            state_importance = self.state_importance[state]
+        for i in range(len(self.states_importance)):
+            state_importance = self.states_importance[i]
             # add to the curr sum for the avg in the future
             sum += state_importance
-        avg = float(sum) / len(self.states)
+        avg = float(sum) / len(self.a1_states)
         self.importance['sum'] = sum
         self.importance['avg'] = avg
 
     def trajectory_importance_avg_delta(self):
         """ computes the importance of the trajectory, according to the average delta approach """
         sum_delta = 0
-        for i in range(1, len(self.states)):
-            sum_delta += self.state_importance[self.states[i]] - self.state_importance[self.states[i - 1]]
-        avg_delta = sum_delta / len(self.states)
+        for i in range(len(self.states_importance)):
+            sum_delta += self.states_importance[i] - self.states_importance[i - 1]
+        avg_delta = sum_delta / len(self.states_importance)
         self.importance['avg_delta'] = avg_delta
 
 
@@ -97,7 +122,7 @@ def trajectory_highlights(trajectories, scores, similarity_limit, budget, method
 
     if method == 'only_score':
         _, indx = np.unique(scores, return_index=True)
-        indx = indx[-1:-budget-1:-1]
+        indx = indx[-1:-budget - 1:-1]
         summary = [trajectories[i] for i in indx]
     else:
         for i in range(1, len(trajectories)):
@@ -105,7 +130,8 @@ def trajectory_highlights(trajectories, scores, similarity_limit, budget, method
                 np.unique(scores, return_inverse=True)
                 if scores[i] in seen_score:
                     continue
-                else: seen_score.add(scores[i])
+                else:
+                    seen_score.add(scores[i])
             for t in summary:
                 if len(set(t.states).intersection(trajectories[i].states)) > similarity_limit:
                     break

@@ -31,17 +31,21 @@ if __name__ == '__main__':
     args.horizon = 10
     args.show_score_bar = False
     args.n_disagreements = 5
-    args.importance = "bety"  # "sb" "bety"
     args.freeze_on_death = False  # when an agent dies, keep getting frames or freeze
-    args.verbose = False
+    args.verbose = True
+    args.state_importance = "bety"  # "sb" "bety"
+    args.freeze_on_death = False  # when an agent dies, keep getting frames or freeze
+    args.trajectory_importance = "max_min"
+    args.importance_type = 'state'  # state/trajectory
 
     """Experiments"""
-    for a1, a2 in permutations(['Expert', 'Novice', 'FearWater'], 2):
+    for a1, a2 in permutations(['Expert', 'LimitedVision', 'HighVision'], 2):
         name = '_'.join([a1, a2])
         args.a1_config = '/home/yotama/Local_Git/InterestingnessXRL/Agent_Comparisons/agents/' + a1
         args.a2_config = '/home/yotama/Local_Git/InterestingnessXRL/Agent_Comparisons/agents/' + a2
         args.output = join('/home/yotama/Local_Git/InterestingnessXRL/Agent_Comparisons/results', name)
         make_clean_dirs(args.output, hard=True)
+
         """run"""
         online_comparison(args)
 

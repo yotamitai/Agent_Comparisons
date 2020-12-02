@@ -155,13 +155,13 @@ if __name__ == '__main__':
     """experiment parameters"""
     args.agent = 0
     args.trial = 0
-    args.num_episodes = 20 # max 2000 (defined in configuration.py)
+    args.num_episodes = 100 # max 2000 (defined in configuration.py)
     args.fps = 2
     args.verbose = True
     args.record = True
     args.show_score_bar = False
     args.clear_results = True
-    args.default_frogger_config = FROGGER_CONFIG_DICT['DEFAULT']
+    args.default_frogger_config = FROGGER_CONFIG_DICT['EXPERT']
 
     # for agent_type in FROGGER_CONFIG_DICT:
     #     if agent_type in ['EXPERT', 'DEFAULT']:
