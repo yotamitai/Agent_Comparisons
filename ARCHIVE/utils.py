@@ -61,6 +61,15 @@ class AgentType(object):
         else:
             return 'Unknown'
 
+class DisagreementTrace(object):
+    def __init__(self, horizon):
+        self.a1_states = []
+        self.a2_trajectories = []
+        self.disagreement_indexes = []
+        self.importance_scores = []
+        self.frame_window = horizon // 2
+
+
 
 def load_agent_config(results_dir, trial=0):
     results_dir = results_dir if results_dir else get_agent_output_dir(DEFAULT_CONFIG, AgentType.Learning, trial)
@@ -161,15 +170,17 @@ def load_agent_aux(config, agent_type, agent_dir, trial, seed, agent_rng, args, 
     if not no_output:
         output_dir = args.output if args.output is not None else get_agent_output_dir(config, agent_type, trial)
     else:
-        output_dir = join(dirname(dirname(agent_dir)), 'compare/temp')
+        output_dir = join(dirname(dirname(agent_dir)), '../compare/temp')
     make_clean_dirs(output_dir, hard=True)
     config.save_json(join(output_dir, 'config.json'))
     helper.save_state_features(join(output_dir, 'state_features.csv'))
     env_id = '{}-{}-v0'.format(config.gym_env_id, trial)
     helper.register_gym_environment(env_id, False, args.fps, args.show_score_bar)
-    env = gym.make(env_id)#.env
+    env = gym.make(env_id).env
     config.num_episodes = args.num_episodes
     video_callable = video_schedule(config, args.record)
+    # env = Monitor(env, directory=output_dir, force=True, video_callable=video_callable)
+    # env.env.monitor = env
     env.seed(seed)
     agent, exploration_strategy = create_agent(helper, agent_type, agent_rng)
     agent.load(agent_dir)
@@ -177,13 +188,9 @@ def load_agent_aux(config, agent_type, agent_dir, trial, seed, agent_rng, args, 
     return env, helper, agent, behavior_tracker, output_dir, video_callable
 
 
-def reload_agent(config, agent_dir, trial, seed, rng, t, actions,e, params):
-    env, helper, agent, behavior_tracker, _, _ = \
+def reload_agent(config, agent_dir, trial, seed, rng, t, actions, params):
+    env, helper, agent, behavior_tracker, output_dir, _ = \
         load_agent_aux(config, 5, agent_dir, trial, seed, rng, params, no_output=True)
-    # each episode resets the environment.
-    # each such env is different in randomly generated parts (logs, cars...)
-    # so -- to load the same game env there is need to do the same number of resets
-    [env.reset() for _ in range(e)]
     old_obs = env.reset()
     old_s = helper.get_state_from_observation(old_obs, 0, False)
     i = 0
@@ -193,7 +200,7 @@ def reload_agent(config, agent_dir, trial, seed, rng, t, actions,e, params):
         r = helper.get_reward(old_s, a, r, s, done)
         agent.update(old_s, a, r, s)
         behavior_tracker.add_sample(old_s, a)
-        helper.update_stats(1, t, old_obs, obs, old_s, a, r, s)
+        helper.update_stats(0, t, old_obs, obs, old_s, a, r, s)
         old_s = s
         old_obs = obs
         i += 1
@@ -205,11 +212,3 @@ def video_schedule(config, videos):
     return (lambda e: True) if videos else \
         (lambda e: videos and (e == config.num_episodes - 1 or
                                e % int(config.num_episodes / config.num_recorded_videos) == 0))
-
-
-def mark_agent(img, position=None, color=255, thickness=2):
-    img2 = img.copy()
-    top_left = (position[0], position[1])
-    bottom_right = (position[0] + 30, position[1] + 30)
-    cv2.rectangle(img2, top_left, bottom_right, color, thickness)
-    return img2

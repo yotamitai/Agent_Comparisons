@@ -3,7 +3,8 @@ import subprocess
 from os.path import join
 
 
-def merge_and_fade(videos_dir, n_HLs, fade_out_frame, fade_duration=2, verbose=False, opacity=0.7):
+def merge_and_fade(videos_dir, n_HLs, fade_out_frame, fade_duration=2, verbose=False,
+                   opacity=0.5):
     """Creates bash file to merge the HL videos and add fade in fade out effects using ffmpeg"""
 
     """Create the necissary files"""
@@ -36,5 +37,6 @@ def merge_and_fade(videos_dir, n_HLs, fade_out_frame, fade_duration=2, verbose=F
     if verbose:
         subprocess.call("./addFadeAndMerge.sh")
     else:
-        subprocess.call("./addFadeAndMerge.sh", stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+        subprocess.call("./addFadeAndMerge.sh", stdout=subprocess.DEVNULL,
+                        stderr=subprocess.STDOUT)
     os.chdir(current_dir)  # return

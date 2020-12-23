@@ -1,19 +1,15 @@
-import os
-
 import gym
 import numpy as np
 import argparse
-import logging
 from os import makedirs
 from os.path import join, exists
 from gym.wrappers import Monitor
-from gym.wrappers.monitoring.video_recorder import VideoRecorder
 
-from Agent_Comparisons.utils import FROGGER_CONFIG_DICT, AgentType, load_agent_config
+from ARCHIVE.utils import FROGGER_CONFIG_DICT, AgentType, load_agent_config
 from interestingness_xrl.scenarios.configurations import EnvironmentConfiguration
 from interestingness_xrl.learning import write_table_csv
 from interestingness_xrl.learning.behavior_tracker import BehaviorTracker
-from interestingness_xrl.scenarios import DEFAULT_CONFIG, create_helper, get_agent_output_dir, create_agent
+from interestingness_xrl.scenarios import create_helper, get_agent_output_dir, create_agent
 
 
 def video_schedule(config, videos):
@@ -69,7 +65,6 @@ def run_trial(args):
     env = Monitor(env, directory=output_dir, force=True, video_callable=video_callable)
 
     # adds reference to monitor to allow for gym environments to update video frames
-    # TODO Yotam: not sure what this does
     if video_callable(0):
         env.env.monitor = env
 
@@ -155,13 +150,13 @@ if __name__ == '__main__':
     """experiment parameters"""
     args.agent = 0
     args.trial = 0
-    args.num_episodes = 100 # max 2000 (defined in configuration.py)
+    args.num_episodes = 1000 # max 2000 (defined in configuration.py)
     args.fps = 2
     args.verbose = True
     args.record = True
     args.show_score_bar = False
     args.clear_results = True
-    args.default_frogger_config = FROGGER_CONFIG_DICT['EXPERT']
+    args.default_frogger_config = FROGGER_CONFIG_DICT['HIGH_VISION']
 
     # for agent_type in FROGGER_CONFIG_DICT:
     #     if agent_type in ['EXPERT', 'DEFAULT']:

@@ -1,45 +1,29 @@
 import argparse
 import logging
-from datetime import datetime
-import gym
 import numpy as np
-
-from disagreement import get_disagreement_frames, disagreement_frames, disagreement_score, save_disagreements, \
-    get_top_k_disagreements, disagreement_states, get_top_k_disagreement_trajectories
-from get_trajectories import State
+from datetime import datetime
+from os.path import join, basename
+from agent_score import agent_score
+from disagreement import save_disagreements, get_top_k_disagreements, disagreement, \
+    DisagreementTrace, State, non_similar_trajectories
 from merge_and_fade import merge_and_fade
-from utils import load_agent_config, load_agent_aux
+from utils import load_agent_config, load_agent_aux, mark_agent
 
 
-def reload_agent(config, agent_dir, trial, seed, rng, t, actions, params):
-    env, helper, agent, behavior_tracker, output_dir, _ = \
-        load_agent_aux(config, 5, agent_dir, trial, seed, rng, params, no_output=True)
-    old_obs = env.reset()
-    old_s = helper.get_state_from_observation(old_obs, 0, False)
-    i = 0
-    for a in actions:
-        obs, r, done, _ = env.step(a)
-        s = helper.get_state_from_observation(obs, r, done)
-        r = helper.get_reward(old_s, a, r, s, done)
-        agent.update(old_s, a, r, s)
-        behavior_tracker.add_sample(old_s, a)
-        helper.update_stats(0, t, old_obs, obs, old_s, a, r, s)
-        old_s = s
-        old_obs = obs
-        i += 1
-    return env, helper, agent, behavior_tracker
-
-
-def get_logging(params):
-    name = '_'.join([params.a1_config.split('/')[-1], params.a2_config.split('/')[-1]])
-    log_name = 'logs/' + '_'.join([name, datetime.now().strftime("%d-%m %H:%M").replace(' ', '_')])
-    logging.basicConfig(filename=log_name + '.log', filemode='w', format='%(name)s - %(levelname)s - %(message)s',
+def get_logging(args):
+    name = '_'.join([basename(args.a1_config), basename(args.a2_config)])
+    file_name = '_'.join([name, datetime.now().strftime("%d-%m %H:%M").replace(' ', '_')])
+    log_name = join('logs', file_name)
+    args.output = join('results', file_name)
+    logging.basicConfig(filename=log_name + '.log', filemode='w',
+                        format='%(name)s - %(levelname)s - %(message)s',
                         level=logging.INFO)
     return name
 
 
 def online_comparison(args):
     """Compare two agents running online, search for disagreements"""
+
     """logging"""
     name = get_logging(args)
     logging.info(f'Comparing Agents: {name}')
@@ -48,6 +32,20 @@ def online_comparison(args):
         print(f'Comparing Agents: {name}')
         print(f'Disagreement importance by: {args.importance_type}')
 
+    """agent overall score"""
+    a1_overall, a1_Rmax = agent_score(args.a1_config)
+    a2_overall, a2_Rmax = agent_score(args.a2_config)
+
+    if a1_overall < 0 and a2_overall > 0:
+        a2_overall += abs(a1_overall)
+        a1_overall = 1
+    if a2_overall < 0 and a1_overall > 0:
+        a1_overall += abs(a2_overall)
+        a2_overall = 1
+
+    agent_ratio = a1_overall / a2_overall
+    # TODO use this to weigh agent value function of state
+
     """get agents"""
     a1_config, a1_agent_dir = load_agent_config(args.a1_config, args.a1_trial)
     a2_config, a2_agent_dir = load_agent_config(args.a2_config, args.a2_trial)
@@ -55,145 +53,151 @@ def online_comparison(args):
     agent_rng = np.random.RandomState(seed)
     a1_env, a1_helper, a1_agent, a1_behavior_tracker, a1_output_dir, video_callable = \
         load_agent_aux(a1_config, 5, a1_agent_dir, args.a1_trial, seed, agent_rng, args)
-    a2_env, a2_helper, a2_agent, _, a2_output_dir, _ = \
-        load_agent_aux(a2_config, 5, a2_agent_dir, args.a2_trial, seed, agent_rng, args, no_output=True)
+    a2_env, a2_helper, a2_agent, _, _, _ = \
+        load_agent_aux(a2_config, 5, a2_agent_dir, args.a2_trial, seed, agent_rng, args,
+                       no_output=True)
 
     """Run"""
-    a1_states, a2_trajectories = [], []
-    disagreement_indexes, importance_scores, a2_traces, all_a1_frames = {}, {}, {}, []
-    dis_i, frame_window = 0, int(args.horizon / 2)  # dis_i = disagreement index of frame
-    # set monitor
-    a1_env.env.monitor = a1_env
-    # reset environment
-    a1_old_obs = a1_env.reset()
-    _ = a2_env.reset()
-    # this is a unique state that represents the elements surrounding the agent
-    a1_old_s = a1_helper.get_state_from_observation(a1_old_obs, 0, False)
-    t = 0
-    a1_done = False
-    while not a1_done:
-    # for i in range(100):  # for testing
-        # select action
-        a1_a = a1_agent.act(a1_old_s)
-        a2_a = a2_agent.act(a1_old_s)
-        # check for disagreement
-        if a1_a != a2_a:  # and dis_i < args.n_highlights:
-            if args.verbose: print(f'Disagreement at frame {t}')
-            logging.info(f'Disagreement at frame {t}')
-            preceding_actions = a1_behavior_tracker.s_a[0]
-            """importance by trajectory or by state"""
-            if args.importance_type == 'trajectory':
-                a2_trajectories.append(disagreement_states(a2_env, a2_agent, a2_helper, frame_window, t,
-                                                           a1_old_s, a1_old_obs, a1_states, args.freeze_on_death))
-            else:
-                a2_traces[dis_i] = disagreement_frames(a2_env, a2_agent, a2_helper, frame_window, t, a1_old_s,
-                                                       a1_old_obs, all_a1_frames, args.freeze_on_death)
-                importance_scores[dis_i] = disagreement_score(a1_agent, a2_agent, a1_old_s, args.importance)
-                disagreement_indexes[dis_i] = t
-                dis_i += 1
-            a2_env.close()
-            del gym.envs.registration.registry.env_specs[a2_env.spec.id]
-            a2_env, a2_helper, a2_agent, a2_behavior_tracker = \
-                reload_agent(a2_config, a2_agent_dir, args.a2_trial, seed, agent_rng, t, preceding_actions, args)
+    traces, da_index = [], args.horizon // 2
+    for e in range(args.num_episodes):
+        logging.info(f'Running Episode number: {e}')
+        if args.verbose: print(f'Running Episode number: {e}')
+        t = 0
+        trace = DisagreementTrace(args.horizon, a1_agent.q, a2_agent.q, agent_ratio)
+        a1_done = False
 
-        # observe transition
-        a1_obs, a1_r, a1_done, _ = a1_env.step(a1_a)
-        a2_obs, a2_r, a2_done, _ = a2_env.step(a1_a)
-        a1_s = a1_helper.get_state_from_observation(a1_obs, a1_r, a1_done)
-        # TODO save death states for frames in the videos. death state == 1295
-        a1_r = a1_helper.get_reward(a1_old_s, a1_a, a1_r, a1_s, a1_done)
+        a1_old_obs = a1_env.reset()
+        _ = a2_env.reset()
+        a1_old_s = a1_helper.get_state_from_observation(a1_old_obs, 0, False)
 
-        # update agent and stats
-        a1_agent.update(a1_old_s, a1_a, a1_r, a1_s)
-        a2_agent.update(a1_old_s, a1_a, a1_r, a1_s)
-        a1_helper.update_stats(0, t, a1_old_obs, a1_obs, a1_old_s, a1_a, a1_r, a1_s)
-        a2_helper.update_stats(0, t, a1_old_obs, a1_obs, a1_old_s, a1_a, a1_r, a1_s)
-        a1_behavior_tracker.add_sample(a1_old_s, a1_a)
-        a1_env.video_recorder.capture_frame()
-        frame = a1_env.video_recorder.last_frame
-        """State object"""
-        a1_states.append(State(t, a1_old_obs, a1_old_s, a1_agent.q[a1_old_s], frame))
-        a1_old_s = a1_s
-        a1_old_obs = a1_obs
-        # save frames or video
-        all_a1_frames.append(frame)
-        t += 1
+        # while not a1_done:
+        for t in range(100):  # for testing
+            # select action
+            a1_a = a1_agent.act(a1_old_s)
+            a2_a = a2_agent.act(a1_old_s)
+            """check for disagreement"""
+            if a1_a != a2_a and t != 0:  # dont allow da on first state
+                if args.verbose: print(f'\tDisagreement at frame {t}')
+                logging.info(f'\tDisagreement at frame {t}')
+                preceding_actions = a1_behavior_tracker.s_a[e]
+                a2_env, a2_helper, a2_agent, _ = \
+                    disagreement(e, trace, a2_env, a2_agent, a2_helper, t, a1_old_s,
+                                 a1_old_obs, a2_config, a2_agent_dir, agent_rng,
+                                 preceding_actions, args)
+            """observe transition"""
+            a1_obs, a1_r, a1_done, _ = a1_env.step(a1_a)
+            a2_obs, a2_r, a2_done, _ = a2_env.step(a1_a)
+            a1_s = a1_helper.get_state_from_observation(a1_obs, a1_r, a1_done)
+            a1_r = a1_helper.get_reward(a1_old_s, a1_a, a1_r, a1_s, a1_done)
+            """update agent and stats"""
+            a1_agent.update(a1_old_s, a1_a, a1_r, a1_s)
+            a2_agent.update(a1_old_s, a1_a, a1_r, a1_s)
+            a1_helper.update_stats(e, t, a1_old_obs, a1_obs, a1_old_s, a1_a, a1_r, a1_s)
+            # a2_helper.update_stats(e, t, a1_old_obs, a1_obs, a1_old_s, a1_a, a1_r, a1_s)
+            a1_behavior_tracker.add_sample(a1_old_s, a1_a)
+            frame = a1_env.render()
+
+            # save state
+            a1_position = [int(x) for x in a1_env.env.game_state.game.frog.position]
+            trace.a1_states.append(
+                State(t, a1_old_obs, a1_old_s, a1_agent.q[a1_old_s], frame, a1_position))
+            a1_old_s = a1_s
+            a1_old_obs = a1_obs
+            t += 1
+
+        """end of episode"""
+        trace.get_trajectories(args.importance_type, args.disagreement_importance,
+                               args.trajectory_importance)
+        trace.diverse_trajectories = non_similar_trajectories(trace.disagreement_trajectories,
+                                                              trace.a1_states, args)
+        traces.append(trace)
+        a1_behavior_tracker.new_episode()
 
     """top k diverse disagreements"""
-    if args.importance_type == 'trajectory':
-        disagreements = get_top_k_disagreement_trajectories(a2_trajectories, a1_states, args)
-        da_frames = [x.disagreement_index for x in disagreements]
-    else:
-        disagreements = get_top_k_disagreements(importance_scores, disagreement_indexes, a1_behavior_tracker, args)
-        da_frames = [x[1] for x in disagreements]
+    disagreements = get_top_k_disagreements(traces, args)
+    if args.verbose: print(f'Obtained {len(disagreements)} disagreements')
+    logging.info(f'Obtained {len(disagreements)} disagreements')
 
-    if args.verbose: print(f'chosen disagreement frames: {da_frames}')
-    logging.info(f'chosen disagreement frames: {da_frames}')
-
-    """get disagreement frames"""
-    if args.importance_type == 'trajectory':
-        a1_disagreement_frames, a2_disagreement_frames = [], []
-        for d in disagreements:
-            a1_frames, a2_frames = d.get_frames()
-            if len(a1_frames) != args.horizon:
-                a1_frames = a1_frames + [a1_frames[-1] for x in range(args.horizon - len(a1_frames))]
-                a2_frames = a2_frames + [a2_frames[-1] for x in range(args.horizon - len(a2_frames))]
-            a1_disagreement_frames.append(a1_frames)
-            a2_disagreement_frames.append(a2_frames)
-    else:
-        a1_disagreement_frames, a2_disagreement_frames = get_disagreement_frames(all_a1_frames,
-                                                                                 a1_behavior_tracker.s_s[0],
-                                                                                 disagreements, a2_traces, frame_window,
-                                                                                 args.freeze_on_death)
+    """mark disagreement frames"""
+    a1_disagreement_frames, a2_disagreement_frames = [], []
+    for d in disagreements:
+        d_state = d.a1_states[da_index - 1]
+        d_state.image = mark_agent(d_state.image, d_state.agent_position)
+        a1_frames, a2_frames = d.get_frames()
+        for i in range(args.horizon // 2, args.horizon):
+            a1_position = d.a1_states[i].agent_position
+            a2_position = d.a2_states[i].agent_position
+            a1_frames[i] = mark_agent(a1_frames[i], position=a1_position, color=255, thickness=1)
+            a2_frames[i] = mark_agent(a2_frames[i], position=a2_position, color=0, thickness=1)
+        a1_disagreement_frames.append(a1_frames)
+        a2_disagreement_frames.append(a2_frames)
 
     """save disagreement frames"""
-    video_dir = save_disagreements(a1_disagreement_frames, a2_disagreement_frames, a1_output_dir, args.fps)
+    video_dir = save_disagreements(a1_disagreement_frames, a2_disagreement_frames, a1_output_dir,
+                                   args.fps)
     if args.verbose: print(f'Disagreements saved')
     logging.info(f'Disagreements saved')
 
     """generate video"""
     fade_duration = 2
     fade_out_frame = args.horizon - fade_duration
-    merge_and_fade(video_dir, args.n_disagreements, fade_out_frame, fade_duration=fade_duration)
+    merge_and_fade(video_dir, args.n_disagreements, fade_out_frame)
     if args.verbose: print(f'DAs Video Generated')
     logging.info(f'DAs Video Generated')
 
     """ writes results to files"""
     a1_agent.save(a1_output_dir)
-    if args.verbose: print('\nResults of trial {} written to:\n\t\'{}\''.format(args.a1_trial, a1_output_dir))
-    logging.info('\nResults of trial {} written to:\n\t\'{}\''.format(args.a1_trial, a1_output_dir))
-    a1_env.close()
-    a2_env.close()
-    del gym.envs.registration.registry.env_specs[a1_env.spec.id]
-    del gym.envs.registration.registry.env_specs[a2_env.spec.id]
+    if args.verbose: print(f'\nResults written to:\n\t\'{a1_output_dir}\'')
+    logging.info(f'\nResults written to:\n\t\'{a1_output_dir}\'')
+    # a1_env.close()
+    # a2_env.close()
+    # del gym.envs.registration.registry.env_specs[a1_env.spec.id]
+    # del gym.envs.registration.registry.env_specs[a2_env.spec.id]
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='RL Agent runner')
     parser.add_argument('-t1', '--a1_trial', help='agent 1 trial number', type=int, default=0)
     parser.add_argument('-t2', '--a2_trial', help='agent 2 trial number', type=int, default=1)
-    parser.add_argument('-r1', '--a1_config', help='directory from which to load agent 1 configuration file')
-    parser.add_argument('-r2', '--a2_config', help='directory from which to load agent 2 configuration file')
-    parser.add_argument('-imp', '--importance', help='method for calculating divergence between agents', type=str,
+    parser.add_argument('-r1', '--a1_config',
+                        help='directory from which to load agent 1 configuration file')
+    parser.add_argument('-r2', '--a2_config',
+                        help='directory from which to load agent 2 configuration file')
+    parser.add_argument('-imp', '--disagreement_importance',
+                        help='method for calculating divergence between agents',
+                        type=str,
                         default='bety')
-    parser.add_argument('-n', '--num_episodes', help='number of episodes to run', type=int, default=1)
+    parser.add_argument('-n', '--num_episodes', help='number of episodes to run', type=int,
+                        default=1)
     parser.add_argument('-o', '--output', help='directory in which to store results')
     parser.add_argument('-c', '--config_file_path', help='path to config file')
-    parser.add_argument('-rv', '--record', help='record videos according to linear schedule', default=True)
+    parser.add_argument('-rv', '--record', help='record videos according to linear schedule',
+                        default=True)
     parser.add_argument('-v', '--verbose', help='print information to the console', default=True)
-    parser.add_argument('-hzn', '--horizon', help='number of frames to show per highlight', type=int, default=20)
+    parser.add_argument('-hzn', '--horizon', help='number of frames to show per highlight',
+                        type=int, default=20)
+    parser.add_argument('-frz_dth', '--freeze_on_death',
+                        help='number of frames to show per highlight', default=False)
     args = parser.parse_args()
 
     """experiment parameters"""
-    args.a1_config = '/home/yotama/Local_Git/InterestingnessXRL/Agent_Comparisons/agents/LimitedVision'
+    args.a1_config = '/home/yotama/Local_Git/InterestingnessXRL/Agent_Comparisons/agents/HighVision'
     args.a2_config = '/home/yotama/Local_Git/InterestingnessXRL/Agent_Comparisons/agents/Expert'
     args.fps = 2
     args.horizon = 10
     args.show_score_bar = False
     args.n_disagreements = 5
-    args.state_importance = "bety"  # "sb" "bety"
-    args.freeze_on_death = False  # when an agent dies, keep getting frames or freeze
-    args.trajectory_importance = "max_min"
-    args.importance_type = 'state'  # state/trajectory
+    args.num_episodes = 10
+
+    """get more/less trajectories"""
+    args.similarity_context = 0  # window of indexes around trajectory for reducing similarity
+    args.similarity_limit = int(args.horizon * 0.66)
+
+    """importance measures"""
+    args.disagreement_importance = "bety"  # "sb" "bety"
+    args.state_importance = "worst"  # worst, second,
+    args.trajectory_importance = "last_state"  # max_min, max_avg, avg, avg_delta, last_state
+    args.importance_type = 'trajectory'  # state/trajectory
+
     """RUN"""
     online_comparison(args)
