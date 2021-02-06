@@ -2,8 +2,8 @@ import argparse
 from itertools import permutations
 from os.path import join
 
-from ARCHIVE.compare_agents import online_comparison
-from ARCHIVE.utils import make_clean_dirs
+from compare_agents import online_comparison
+from utils import make_clean_dirs
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='RL Agent runner')
@@ -25,27 +25,26 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     """experiment parameters"""
-    args.a1_config = '/home/yotama/Local_Git/InterestingnessXRL/Agent_Comparisons/agents/Expert'
-    args.a2_config = '/home/yotama/Local_Git/InterestingnessXRL/Agent_Comparisons/agents/Novice'
-    args.fps = 2
+    args.fps = 1
     args.horizon = 10
     args.show_score_bar = False
     args.n_disagreements = 5
-    args.freeze_on_death = False  # when an agent dies, keep getting frames or freeze
-    args.verbose = True
-    args.similarity_limit = 4
-    args.similarity_context = 5
+    args.num_episodes = 10
+    args.randomized = True
+
+    """get more/less trajectories"""
+    args.similarity_context = 0  # window of indexes around trajectory for reducing similarity
+    args.similarity_limit = 3 #int(args.horizon * 0.66)
+
+    """importance measures"""
     args.disagreement_importance = "bety"  # "sb" "bety"
-    args.state_importance = "second"  # worst, second
-    args.trajectory_importance = "max_min"  # max_min, max_avg, avg, avg_delta, last_state
+    args.trajectory_importance = "last_state_val"  # last_state_val, max_min, max_avg, avg, avg_delta, last_state
     args.importance_type = 'trajectory'  # state/trajectory
     """Experiments"""
-    for a1, a2 in permutations(['Expert', 'LimitedVision_Mid', 'HighVision_Mid'], 2):
-        name = '_'.join([a1, a2])
+    for a1, a2 in permutations(['Expert', 'LimitedVision', 'HighVision'], 2):
+        args.name = '_'.join([a1, a2])
         args.a1_config = '/home/yotama/Local_Git/InterestingnessXRL/Agent_Comparisons/agents/' + a1
         args.a2_config = '/home/yotama/Local_Git/InterestingnessXRL/Agent_Comparisons/agents/' + a2
-        args.output = join('/home/yotama/Local_Git/InterestingnessXRL/Agent_Comparisons/results', name)
-        make_clean_dirs(args.output, hard=True)
 
         """run"""
         online_comparison(args)

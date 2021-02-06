@@ -5,7 +5,7 @@ from os import makedirs
 from os.path import join, exists
 from gym.wrappers import Monitor
 
-from ARCHIVE.utils import FROGGER_CONFIG_DICT, AgentType, load_agent_config
+from utils import FROGGER_CONFIG_DICT, AgentType, load_agent_config
 from interestingness_xrl.scenarios.configurations import EnvironmentConfiguration
 from interestingness_xrl.learning import write_table_csv
 from interestingness_xrl.learning.behavior_tracker import BehaviorTracker
@@ -150,13 +150,13 @@ if __name__ == '__main__':
     """experiment parameters"""
     args.agent = 0
     args.trial = 0
-    args.num_episodes = 1000 # max 2000 (defined in configuration.py)
+    args.num_episodes = 2000 # max 2000 (defined in configuration.py)
     args.fps = 2
     args.verbose = True
     args.record = True
     args.show_score_bar = False
     args.clear_results = True
-    args.default_frogger_config = FROGGER_CONFIG_DICT['HIGH_VISION']
+    args.default_frogger_config = FROGGER_CONFIG_DICT['DEFAULT']
 
     # for agent_type in FROGGER_CONFIG_DICT:
     #     if agent_type in ['EXPERT', 'DEFAULT']:

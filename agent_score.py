@@ -3,7 +3,7 @@ import argparse
 import gym
 import numpy as np
 
-from ARCHIVE.utils import load_agent_config
+from utils import load_agent_config
 
 from interestingness_xrl.learning.behavior_tracker import BehaviorTracker
 from interestingness_xrl.scenarios import create_helper, create_agent
@@ -21,27 +21,29 @@ def agent_score(path):
     agent, exploration_strategy = create_agent(helper, 1, agent_rng)
     agent.load(path)
     behavior_tracker = BehaviorTracker(config.num_episodes)
-    old_obs = env.reset()
-    old_s = helper.get_state_from_observation(old_obs, 0, False)
 
-    t = 0
-    done = False
-    while not done:
-        a = agent.act(old_s)
-        obs, r, done, _ = env.step(a)
-        s = helper.get_state_from_observation(obs, r, done)
-        r = helper.get_reward(old_s, a, r, s, done)
-        agent.update(old_s, a, r, s)
-        behavior_tracker.add_sample(old_s, a)
-        helper.update_stats(0, t, old_obs, obs, old_s, a, r, s)
-        old_s = s
-        old_obs = obs
-        t += 1
+    scores =[]
+    for k in range(5):
+        curr_obs = env.reset()
+        curr_s = helper.get_state_from_observation(curr_obs, 0, False)
+        t = 0
+        done = False
+        while not done:
+            a = agent.act(curr_s)
+            obs, r, done, _ = env.step(a)
+            s = helper.get_state_from_observation(obs, r, done)
+            r = helper.get_reward(curr_s, a, r, s, done)
+            agent.update(curr_s, a, r, s)
+            behavior_tracker.add_sample(curr_s, a)
+            helper.update_stats(k, t, curr_obs, obs, curr_s, a, r, s)
+            curr_s = s
+            curr_obs = obs
+            t += 1
+        scores.append(env.env.previous_score)
 
-    overall_score = env.env.previous_score
     env.close()
     del gym.envs.registration.registry.env_specs[env.spec.id]
-    return overall_score, agent.r_sa.max()
+    return sum(scores)/len(scores)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
