@@ -198,8 +198,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     """experiment parameters"""
-    args.a1_dir = abspath('agents/Expert')
-    args.a2_dir = abspath('agents/LimitedVision')
+    args.a1_dir = abspath('agents/HighVision_Mid')
+    args.a2_dir = abspath('agents/LimitedVision_Low')
     # args.fps = 1
     # args.horizon = 10
     # args.show_score_bar = False
