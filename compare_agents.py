@@ -5,7 +5,7 @@ import random
 import gym
 import numpy as np
 from datetime import datetime
-from os.path import join, basename
+from os.path import join, basename, abspath
 from agent_score import agent_score
 from disagreement import save_disagreements, get_top_k_disagreements, disagreement, \
     DisagreementTrace, State
@@ -14,7 +14,7 @@ from utils import load_agent_config, load_agent_aux, mark_agent
 
 
 def get_logging(args):
-    name = '_'.join([basename(args.a1_config), basename(args.a2_config)])
+    name = '_'.join([basename(args.a1_dir), basename(args.a2_dir)])
     file_name = '_'.join([name, datetime.now().strftime("%d-%m %H:%M:%S").replace(' ', '_')])
     log_name = join('logs', file_name)
     args.output = join('results', file_name)
@@ -51,27 +51,24 @@ def online_comparison(args):
     # for testing
     agent_ratio = 1
 
-    # TODO use this to weigh agent value function of state
-
     """get agents"""
-    a1_config, a1_agent_dir = load_agent_config(args.a1_config, args.a1_trial)
-    a2_config, a2_agent_dir = load_agent_config(args.a2_config, args.a2_trial)
+    a1_config, a1_agent_dir = load_agent_config(args.a1_dir)
+    a2_config, a2_agent_dir = load_agent_config(args.a2_dir)
     seed = a1_config.seed
     agent_rng = np.random.RandomState(seed)
     a1_env, a1_helper, a1_agent, a1_behavior_tracker, a1_output_dir, video_callable = \
-        load_agent_aux(a1_config, 5, a1_agent_dir, args.a1_trial, seed, agent_rng, args)
+        load_agent_aux(a1_config, 5, a1_agent_dir, 0, seed, agent_rng, args)
     a2_env, a2_helper, a2_agent, _, _, _ = \
-        load_agent_aux(a2_config, 5, a2_agent_dir, args.a2_trial, seed, agent_rng, args,
-                       no_output=True)
+        load_agent_aux(a2_config, 5, a2_agent_dir, 1, seed, agent_rng, args, no_output=True)
     a1_Qmax, a2_Qmax = max([max(x) for x in a1_agent.q]), max([max(x) for x in a2_agent.q])
-    a1_agent.q, a2_agent.q = a1_agent.q/a1_Qmax, a2_agent.q/a2_Qmax
+    a1_agent.q, a2_agent.q = a1_agent.q / a1_Qmax, a2_agent.q / a2_Qmax
 
-    """skip first games (easy)"""
+    """skip first games"""
     # [a1_env.reset() for _ in range(5)]
     # [a2_env.reset() for _ in range(5)]
 
     """Run"""
-    traces, da_index = [], args.horizon // 2
+    traces = []
     for e in range(args.num_episodes):
         logging.info(f'Running Episode number: {e}')
         if args.verbose: print(f'Running Episode number: {e}')
@@ -80,7 +77,6 @@ def online_comparison(args):
         a1_done = False
         a1_curr_obs = a1_env.reset()
         _ = a2_env.reset()
-
         """first state"""
         a1_curr_s = a1_helper.get_state_from_observation(a1_curr_obs, 0, False)
         frame = a1_env.render()
@@ -89,8 +85,6 @@ def online_comparison(args):
             State(t, e, a1_curr_obs, a1_curr_s, a1_agent.q[a1_curr_s], frame, a1_position))
 
         while not a1_done:
-            # for t in range(80):  # for testing
-            # select action
             a1_a = a1_agent.act(a1_curr_s)
             a2_a = a2_agent.act(a1_curr_s)
             """check for disagreement"""
@@ -108,15 +102,14 @@ def online_comparison(args):
             a1_new_s = a1_helper.get_state_from_observation(a1_new_obs, a1_r, a1_done)
             if a1_new_s == 1036:
                 trace.lilies_reached += 1
-                a1_done = True if trace.lilies_reached == 2 else False
+                a1_done = True if trace.lilies_reached == 2 else False  # if lvl completed
             a1_r = a1_helper.get_reward(a1_curr_s, a1_a, a1_r, a1_new_s, a1_done)
             """update agent and stats"""
             a1_agent.update(a1_curr_s, a1_a, a1_r, a1_new_s)
             a2_agent.update(a1_curr_s, a1_a, a1_r, a1_new_s)
             a1_helper.update_stats(e, t, a1_curr_obs, a1_new_obs, a1_curr_s, a1_a, a1_r, a1_new_s)
             a1_behavior_tracker.add_sample(a1_curr_s, a1_a)
-
-            # save state
+            """save state"""
             t += 1
             frame = a1_env.render()
             a1_curr_s = a1_new_s
@@ -127,22 +120,13 @@ def online_comparison(args):
             trace.a1_scores.append(a1_env.env.previous_score)
 
         """end of episode"""
-        trace.get_trajectories(e, args.importance_type, args.disagreement_importance,
+        trace.get_trajectories(e, args.importance_type, args.state_importance,
                                args.trajectory_importance)
-        # trace.diverse_trajectories = non_similar_trajectories(trace.disagreement_trajectories,
-        #                                                       trace.a1_states, args)
         traces.append(trace)
         a1_behavior_tracker.new_episode()
 
     """top k diverse disagreements"""
     disagreements = get_top_k_disagreements(traces, args)
-
-    """random disagreements"""
-    # all_trajectories = []
-    # for trace in traces:
-    #     all_trajectories += [t for t in trace.disagreement_trajectories]
-    # disagreements = random.choices(all_trajectories, k=args.n_disagreements)
-
     if args.verbose: print(f'Obtained {len(disagreements)} disagreements')
     logging.info(f'Obtained {len(disagreements)} disagreements')
 
@@ -152,7 +136,7 @@ def online_comparison(args):
     """mark disagreement frames"""
     a1_disagreement_frames, a2_disagreement_frames = [], []
     for d in disagreements:
-        d_state = d.a1_states[da_index - 1]
+        d_state = d.a1_states[(args.horizon // 2) - 1]
         d_state.image = mark_agent(d_state.image, d_state.agent_position)
         a1_frames, a2_frames = d.get_frames()
         for i in range(args.horizon // 2, args.horizon):
@@ -189,48 +173,47 @@ def online_comparison(args):
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='RL Agent runner')
-    parser.add_argument('-t1', '--a1_trial', help='agent 1 trial number', type=int, default=0)
-    parser.add_argument('-t2', '--a2_trial', help='agent 2 trial number', type=int, default=1)
-    parser.add_argument('-r1', '--a1_config',
-                        help='directory from which to load agent 1 configuration file')
-    parser.add_argument('-r2', '--a2_config',
-                        help='directory from which to load agent 2 configuration file')
-    parser.add_argument('-imp', '--disagreement_importance',
-                        help='method for calculating divergence between agents',
-                        type=str,
-                        default='bety')
+    parser = argparse.ArgumentParser(description='RL Agent Comparisons')
+    parser.add_argument('-r1', '--a1_dir', help='agent 1 configuration file directory')
+    parser.add_argument('-r2', '--a2_dir', help='agent 2 configuration file directory')
     parser.add_argument('-n', '--num_episodes', help='number of episodes to run', type=int,
-                        default=1)
-    parser.add_argument('-o', '--output', help='directory in which to store results')
-    parser.add_argument('-c', '--config_file_path', help='path to config file')
-    parser.add_argument('-rv', '--record', help='record videos according to linear schedule',
-                        default=True)
+                        default=3)
+    parser.add_argument('-fps', '--fps', help='summary video fps', type=int, default=1)
+    parser.add_argument('-l', '--horizon', help='number of frames to show per highlight',
+                        type=int, default=10)
+    parser.add_argument('-sb', '--show_score_bar', help='score bar', type=bool, default=False)
+    parser.add_argument('-rand', '--randomized', help='randomize order of summary trajectories',
+                        type=bool, default=True)
+    parser.add_argument('-k', '--n_disagreements', help='# of disagreements in the summary',
+                        type=int, default=5)
+    parser.add_argument('-overlaplim', '--similarity_limit', help='# overlaping',
+                        type=int, default=3)
+    parser.add_argument('-impMeth', '--importance_type',
+                        help='importance by state or trajectory', default='trajectory')
+    parser.add_argument('-impTraj', '--trajectory_importance',
+                        help='method calculating trajectory importance', default='last_state_val')
+    parser.add_argument('-impState', '--state_importance',
+                        help='method calculating state importance', default='bety')
     parser.add_argument('-v', '--verbose', help='print information to the console', default=True)
-    parser.add_argument('-hzn', '--horizon', help='number of frames to show per highlight',
-                        type=int, default=20)
-    parser.add_argument('-frz_dth', '--freeze_on_death',
-                        help='number of frames to show per highlight', default=False)
     args = parser.parse_args()
 
     """experiment parameters"""
-    args.a1_config = '/home/yotama/Local_Git/InterestingnessXRL/Agent_Comparisons/agents/Mid'
-    args.a2_config = '/home/yotama/Local_Git/InterestingnessXRL/Agent_Comparisons/agents/LimitedVision'
-    args.fps = 1
-    args.horizon = 10
-    args.show_score_bar = False
-    args.n_disagreements = 5
-    args.num_episodes = 10
-    args.randomized = True
+    args.a1_dir = abspath('agents/Expert')
+    args.a2_dir = abspath('agents/LimitedVision')
+    # args.fps = 1
+    # args.horizon = 10
+    # args.show_score_bar = False
+    # args.n_disagreements = 5
+    # args.num_episodes = 10
+    # args.randomized = True
 
     """get more/less trajectories"""
-    args.similarity_context = 0  # window of indexes around trajectory for reducing similarity
-    args.similarity_limit = 3  # int(args.horizon * 0.66)
+    # args.similarity_limit = 3  # int(args.horizon * 0.66)
 
     """importance measures"""
-    args.disagreement_importance = "bety"  # "sb" "bety"
-    args.trajectory_importance = "last_state_val"  # last_state_loc,  last_state_val, max_min, max_avg, avg, avg_delta
-    args.importance_type = 'trajectory'  # state/trajectory
+    # args.state_importance = "bety"  # "sb" "bety"
+    # args.trajectory_importance = "last_state_val"  # last_state_loc,  last_state_val, max_min, max_avg, avg, avg_delta
+    # args.importance_type = 'trajectory'  # state/trajectory
 
     """RUN"""
     online_comparison(args)

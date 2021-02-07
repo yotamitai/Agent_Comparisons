@@ -5,7 +5,6 @@ import gym
 import imageio
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.special import softmax
 
 from get_trajectories import trajectory_importance_max_min, \
     trajectory_importance_max_avg, trajectory_importance_avg, trajectory_importance_avg_delta
@@ -161,73 +160,28 @@ def disagreement(episode, trace, a2_env, a2_agent, a2_helper, t, a1_curr_s,
     trace.disagreement_indexes.append(t)
     a2_env.close()
     del gym.envs.registration.registry.env_specs[a2_env.spec.id]
-    return reload_agent(a2_config, a2_agent_dir, args.a2_trial, a2_config.seed, agent_rng, t,
+    return reload_agent(a2_config, a2_agent_dir, 1, a2_config.seed, agent_rng, t,
                         prev_actions, episode, args)
 
-
-# def normalize_q_values(s):
-#     q = s.action_values
-#     q_sum = np.sum(q)
-#     if not q_sum:
-#         # can happen in states where all q values are 0
-#         return np.array([0, 0, 0, 0])
-#     normalized = np.true_divide(q, q_sum)
-#     return normalized
 
 
 def second_best_confidence(s1, s2, agent_ratio):
     """compare best action to second-best action"""
     a1_vals = (s1.action_values / abs(sum(s1.action_values)))
     a2_vals = (s2.action_values / abs(sum(s2.action_values)))
-    # a1_vals = s1.action_values * agent_ratio
-    # a2_vals = s2.action_values
     sorted_q1 = sorted(a1_vals, reverse=True)
     sorted_q2 = sorted(a2_vals, reverse=True)
-
-    # normalize to get probabilities
-    # a1_actions_normalized = normalize_q_values(s1)
-    # a2_actions_normalized = normalize_q_values(s2)
-    # # get difference between best action and second best
-    # sorted_q1 = sorted(a1_actions_normalized, reverse=True)
-    # sorted_q2 = sorted(a2_actions_normalized, reverse=True)
     a1_diff = sorted_q1[0] - sorted_q1[1] * agent_ratio
     a2_diff = sorted_q2[0] - sorted_q2[1]
     return a1_diff + a2_diff
 
 
 def better_than_you_confidence(s1, s2, agent_ratio):
-    """compare best action to the action chosen by the opposing agent"""
-    # normalize to get probabilities
     a1_vals = (s1.action_values/abs(sum(s1.action_values)))
     a2_vals = (s2.action_values/abs(sum(s2.action_values)))
-    # a1_vals = s1.action_values * agent_ratio
-    # a2_vals = s2.action_values
     a1_diff = (max(a1_vals) - a1_vals[np.argmax(a2_vals)]) * agent_ratio
     a2_diff = max(a2_vals) - a2_vals[np.argmax(a1_vals)]
-    # a1_actions_normalized = normalize_q_values(s1)
-    # a2_actions_normalized = normalize_q_values(s2)
-    # # get difference between best action and second best
-    # a1_diff = max(a1_actions_normalized) - a1_actions_normalized[
-    #     np.argmax(a2_actions_normalized)]
-    # a2_diff = max(a2_actions_normalized) - a2_actions_normalized[
-    #     np.argmax(a1_actions_normalized)]
-
     return a1_diff + a2_diff
-
-
-# def compare_state_values(s1, s2, weight=1):
-#     """return the value difference between agents"""
-# a1_actions_normalized = normalize_q_values(s1) * w1
-# a2_actions_normalized = normalize_q_values(s2) * w2
-# if importance == 'worst':
-#     score1 = np.max(a1_actions_normalized) - np.min(a1_actions_normalized)
-#     score2 = np.max(a2_actions_normalized) - np.min(a2_actions_normalized)
-# elif importance == 'second':
-#     score1 = np.max(a1_actions_normalized) - \
-#              np.partition(a1_actions_normalized.flatten(), -2)[-2]
-#     score2 = np.max(a2_actions_normalized) - \
-#              np.partition(a2_actions_normalized.flatten(), -2)[-2]
-# return abs(score1 - score2)
 
 
 def disagreement_score(s1, s2, importance, agent_ratio):
@@ -295,27 +249,6 @@ def disagreement_states(trace, env, agent, helper, time_step, curr_s):
         da_scores.append(env.env.previous_score)
     return da_states, da_scores
 
-
-# def non_similar_trajectories(trajectories, all_a1_states, args):
-#     diverse_trajectories, seen_indexes, seen_score = [], set(), []
-#     sorted_trajectories = sorted(trajectories, key=lambda x: x.importance, reverse=True)
-#     for trajectory in sorted_trajectories:
-#         # if trajectory.disagreement_score in seen_score: continue
-#         indexes = [x.name for x in trajectory.a1_states]
-#         if len(seen_indexes.intersection(set(indexes))) > args.similarity_limit: continue
-#         if args.similarity_context:
-#             start_i = 0 if indexes[0] < args.similarity_context else \
-#                 indexes[0] - args.similarity_context
-#             end_i = len(all_a1_states) - 1 if indexes[-1] > (
-#                     len(all_a1_states) - 1) - args.similarity_context \
-#                 else indexes[-1] + args.similarity_context
-#             indexes = list(range(start_i, end_i + 1))
-#         diverse_trajectories.append(trajectory)
-#         [seen_indexes.add(x) for x in indexes]
-#         # seen_score.append(trajectory.disagreement_score)
-#     return diverse_trajectories
-
-
 def get_top_k_disagreements(traces, args):
     """"""
     top_k_diverse_trajectories, discarded_context, discarded_importance = [], [], []
@@ -376,29 +309,3 @@ def get_top_k_disagreements(traces, args):
                 t.a1_states += [t.a1_states[-1]]
                 t.a2_states += [t.a2_states[-1]]
     return top_k_diverse_trajectories
-
-# def get_top_k_disagreements2(traces, args):
-#     """"""
-#     top_k_diverse_trajectories = []
-#     """get diverse trajectories"""
-#     all_trajectories = []
-#     for trace in traces:
-#         all_trajectories += [t for t in trace.diverse_trajectories]
-#     sorted_trajectories = sorted(all_trajectories, key=lambda x: x.importance, reverse=True)
-#     for trajectory in sorted_trajectories:
-#         top_k_diverse_trajectories.append(trajectory)
-#         if len(top_k_diverse_trajectories) == args.n_disagreements:
-#             break
-#
-#     """make all trajectories the same length"""
-#     for t in top_k_diverse_trajectories:
-#         if len(t.a1_states) < args.horizon:
-#             for _ in range(args.horizon - len(t.a1_states)):
-#                 t.a1_states += [t.a1_states[-1]]
-#                 t.a2_states += [t.a2_states[-1]]
-#     return top_k_diverse_trajectories
-
-
-# def trajectory_distance(t1, t2):
-#     """get the distance between two trajectories"""
-#     pass

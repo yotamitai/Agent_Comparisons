@@ -63,16 +63,16 @@ class AgentType(object):
             return 'Unknown'
 
 
-def load_agent_config(results_dir, trial=0):
-    results_dir = results_dir if results_dir else get_agent_output_dir(DEFAULT_CONFIG,
-                                                                       AgentType.Learning, trial)
-    config_file = os.path.join(results_dir, 'config.json')
-    if not os.path.exists(results_dir) or not os.path.exists(config_file):
+def load_agent_config(agent_dir, trial=0):
+    agent_dir = agent_dir if agent_dir else get_agent_output_dir(DEFAULT_CONFIG,
+                                                                 AgentType.Learning, trial)
+    config_file = os.path.join(agent_dir, 'config.json')
+    if not os.path.exists(agent_dir) or not os.path.exists(config_file):
         raise ValueError(f'Could not load configuration from: {config_file}.')
     configuration = EnvironmentConfiguration.load_json(config_file)
     # if testing, we want to force a seed different than training (diff. test environments)
     #     configuration.seed += 1
-    return configuration, results_dir
+    return configuration, agent_dir
 
 
 def get_agent_output_dir(config, agent_t, trial_num=0):
@@ -111,13 +111,6 @@ def pickle_save(obj, path):
     with open(path, "wb") as file:
         pickle.dump(obj, file)
 
-
-# def create_video(output_dir, frames, name='video'):
-#     imgs = []
-#     kargs = {'macro_block_size': None, 'fps': 3}
-#     for f in frames:
-#         imgs.append(img_as_ubyte(f))
-#     imageio.mimwrite(output_dir + "/" + name +'.mp4', imgs, 'MP4', **kargs)
 
 def create_video(frame_dir, video_dir, agent_hl, size, length, fps):
     img_array = []
@@ -175,7 +168,7 @@ def load_agent_aux(config, agent_type, agent_dir, trial, seed, agent_rng, args, 
     helper.register_gym_environment(env_id, False, args.fps, args.show_score_bar)
     env = gym.make(env_id, level=1)  # .env
     config.num_episodes = args.num_episodes
-    video_callable = video_schedule(config, args.record)
+    video_callable = video_schedule(config, True)
     env.seed(seed)
     agent, exploration_strategy = create_agent(helper, agent_type, agent_rng)
     agent.load(agent_dir)
